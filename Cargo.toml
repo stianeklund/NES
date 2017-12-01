@@ -1,5 +1,5 @@
 [package]
-name = "NES"
+name = "nes"
 version = "0.1.0"
 authors = ["Stian Eklund <stian.eklund@gmail.com>"]
 
