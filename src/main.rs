@@ -6,7 +6,7 @@ mod cpu;
 mod rom;
 mod opcode;
 
-use memory::Memory;
+use memory::{Memory, Ram};
 use rom::{Cartridge, RomHeader};
 use cpu::{ExecutionContext, Cpu};
 fn main() {
@@ -18,10 +18,9 @@ fn main() {
     }
     let file = &args[1];
 
-    let mut memory = memory::Ram::new();
     let mut exec = ExecutionContext::new();
+    let mut memory = Ram::new();
     exec.cart.load_cartridge(&file);
-    exec.cart.read_into_memory(memory);
     for _ in 0..5 {
         exec.decode();
         println!("{:?}", exec.cpu);

@@ -112,7 +112,8 @@ impl ExecutionContext {
     }
 
     pub fn decode(&mut self) {
-        let opcode = self.read_byte(self.cpu.reg.pc + 1);
+        // let opcode = self.read_byte(self.cpu.reg.pc + 1);
+        let opcode = self.cart.prg[self.cpu.reg.pc as usize + 1];
 
         match opcode {
             0x00 => self.cpu.flags.brk = 1,
@@ -128,6 +129,7 @@ impl ExecutionContext {
         self.cpu.flags.zero == self.cpu.reg.acc;
     }
     fn ldx(&mut self) {
+        println!("LDX ran");
         unimplemented!();
     }
 
@@ -135,4 +137,3 @@ impl ExecutionContext {
         unimplemented!();
     }
 }
-

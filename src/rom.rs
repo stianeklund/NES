@@ -1,5 +1,6 @@
 
 use std::ops::{Range, RangeTo, Index};
+use std::fmt;
 use std::path::Path;
 use std::io::Read;
 use std::fs::File;
@@ -22,9 +23,13 @@ use std::convert;
 //  11-15 Zero filled
 /* ******************************************************************************************** */
 
+// Defined constant sizes for the PRG & CHR banks
+const PRG_ROM_BANK_SIZE: usize = 16384;
+const CHR_ROM_BANK_SIZE: usize = 8192;
+
 #[derive(Debug)]
 pub struct RomHeader {
-    pub magic: Box<[u8; 4]>,         // 0 - 3 "Magic" expects "NES" + 0x1a
+    pub magic: Box<[u8; 4]>,
     sram: u8,
     pub prg_rom_size: u8,
     pub chr_rom_size: u8,
@@ -34,7 +39,7 @@ pub struct RomHeader {
     pub chr_ram_size: u8,
     flags_9: u8,
     flags_10: u8,
-    pub zero: Box<[u8; 5]>,          // Zero padding
+    pub zero: Box<[u8; 5]>,
 }
 
 impl Default for RomHeader {
@@ -57,10 +62,11 @@ impl Default for RomHeader {
 
 #[derive(Debug)]
 pub struct Cartridge {
-    pub header: Box<RomHeader>, // 16 Bytes of Header data
+    pub header: Box<RomHeader>, // iNES Header
     pub prg: Vec<u8>,           // A copy of the games program rom? Why? Is this for mirroring?
     pub chr: Vec<u8>,           // Copy of the games pattern table ROM or RAM for save states.
     pub rom: Vec<u8>,           // Temporary copy of ROM contents
+    pub mapper_id: u8           // Mapper ID
 
 }
 
@@ -69,87 +75,89 @@ impl Cartridge {
 
         Cartridge {
             header: Box::<RomHeader>::default(),
-            prg: Vec::<u8>::new(),
-            chr: Vec::<u8>::new(),
+            prg: vec![0; 2 * 16000],
+            chr: vec![0; 2 * 8000],
             rom: vec![0; 0x85_000],
+            mapper_id: 0,
         }
     }
+    // Returns the mapper ID (for mapper identification)
+    pub fn retrieve_mapper_id(&self) -> u8 {
+        (self.header.flags_7 & 0xf0)| (self.header.flags_6 >> 4)
+    }
     pub fn read_rom(&mut self, file: &str) {
-        // TODO Validate Header
         let path = Path::new(file);
         let mut f = File::open(&path).expect("Couldn't find ROM");
         let mut buf = Vec::new();
 
 
-        f.read_to_end(&mut buf);
-        if buf.len() < 16 {
-            panic!("Unable to read ROM header. {}");
-        }
-
+        f.read_to_end(&mut buf).expect("i/o error, could not read file to end");
         self.rom[..buf.len()].clone_from_slice(&buf[..]);
 
-        println!("Loaded: {}, Size(KB): {:?}", path.to_str().unwrap(),
+        println!("\nLoaded: {} Size(KB): {:?}", path.to_str().unwrap(),
                  (buf.len() as f64 * 0.0009765625) as u32);
     }
-    pub fn parse_header(&mut self) {
-        let rom = &self.rom;
+    // Validates parts of the iNES file format
+    pub fn validate_header(&mut self, header_data: &str) -> bool {
 
-        self.header.magic = Box::from([rom[0], rom[1], rom[2], rom[3]]);
+        let path = Path::new(header_data);
+        let mut file = File::open(&path).expect("Couldn't find ROM");
+        // The iNES header is 16 bytes long
+        let mut header = [0u8; 16];
+        file.read_exact(&mut header);
+
+        self.header.magic = Box::from([header[0], header[1], header[2], header[3]]);
         self.header.sram = 0;
-        self.header.prg_rom_size = rom[4];
-        self.header.chr_rom_size = rom[5];
-        self.header.flags_6 = rom[6];
-        self.header.flags_7 = rom[7];
-        self.header.prg_ram_size = rom[8];
+        self.header.prg_rom_size = header[4];
+        self.header.chr_rom_size = header[5];
+        self.header.flags_6 = header[6];
+        self.header.flags_7 = header[7];
+        self.header.prg_ram_size = header[8];
+        self.header.flags_9 = header[9];
+        self.header.flags_10 = header[10];
+        self.header.zero = Box::from([header[11], header[12], header[13], header[14], header[15]]);
+        self.mapper_id = (header[7] & 0x0f) | (header[6] >> 4);
 
-        self.header.flags_9 = rom[9];
-        self.header.flags_10 = rom[10];
-        self.header.zero = Box::from([rom[11], rom[12], rom[13], rom[14], rom[15]]);
-
-
+        // Print out the NES character identifier if found
         if self.header.magic.is_ascii() {
             let magic = str::from_utf8(&*self.header.magic).unwrap().trim_right_matches('');
             println!("ROM header: {}", magic);
+
+            // Print bank sizes
+            println!("PRG ROM {} 16KB Pages", self.header.prg_rom_size);
+            println!("CHR ROM {}  8KB Pages", self.header.chr_rom_size);
+            println!("PRG RAM {}  8KB Pages", self.header.prg_ram_size);
+
+            // TODO Research mappers & add more
+            let id = match self.mapper_id {
+                0 => "NROM",
+                1 => "MMC1",
+                2 => "UxROM",
+                _ => "Unknown mapper",
+            };
+            println!("Mapper ID {}         ", id);
+
+            return true;
+        } else {
+            return false;
+            panic!("ROM not identified as NES rom");
         }
     }
+
     // TODO Figure out how to load cart rom into memory banks
     pub fn load_cartridge(&mut self, file: &str) {
-        self.read_rom(&file);
 
-        let rom = &self.rom;
-
-        // Parse header data
-        self.header.magic = Box::from([rom[0], rom[1], rom[2], rom[3]]);
-        self.header.sram = 0;
-        self.header.prg_rom_size = rom[4];
-        self.header.chr_rom_size = rom[5];
-        self.header.flags_6 = rom[6];
-        self.header.flags_7 = rom[7];
-        self.header.prg_ram_size = rom[8];
-
-        self.header.flags_9 = rom[9];
-        self.header.flags_10 = rom[10];
-        self.header.zero = Box::from([rom[11], rom[12], rom[13], rom[14], rom[15]]);
-
-
-        if self.header.magic.is_ascii() {
-            let magic = str::from_utf8(&*self.header.magic).unwrap().trim_right_matches('');
-            println!("ROM header: {}", magic);
+        if self.validate_header(file) {
+            self.read_rom(file);
+        } else {
+            panic!("Could not validate iNES header");
         }
-
-        println!("PRG ROM {} 16KB Pages", self.header.prg_rom_size);
-        println!("CHR ROM {}  8KB Pages", self.header.chr_rom_size);
-        println!("PRG RAM {}  8KB Pages", self.header.prg_ram_size);
-        self.prg = [rom[4] * 16384].to_vec();
-        self.chr = [rom[5] * 8192].to_vec();
-
-        println!("Loaded, PRG {:?}, CHR {:?}", self.prg, self.chr);
-    }
-    pub fn read_into_memory(&mut self, mut memory: Ram) {
-        let prg = &self.prg;
-        memory.memory[..prg.len()].clone_from_slice(&prg[..]);
-
-        // let prg = self.prg;
+        let prg_size = self.header.prg_rom_size as usize * PRG_ROM_BANK_SIZE;
+        let chr_size = self.header.chr_rom_size as usize * CHR_ROM_BANK_SIZE;
+        let mut prg = vec![0u8; prg_size].to_vec();
+        let mut chr = vec![0u8; chr_size].to_vec();
+        self.prg = prg;
+        self.chr = chr;
 
     }
 }
