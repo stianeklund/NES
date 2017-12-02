@@ -4,13 +4,14 @@ use std::fmt::{Debug, Formatter, Result};
 use std::path::Path;
 use std::fs::File;
 use std::io::Read;
-
+use cpu::ExecutionContext;
+use rom::{Cartridge, RomHeader};
 
 pub trait Memory {
     fn high_nibble(byte: u8) -> u8;
     fn low_nibble(byte: u8) -> u8;
-    fn read_byte(&mut self, addr: u16) -> u8;
-    fn read_word(&mut self, addr: u16) -> u16;
+    fn read_byte(&self, addr: u16) -> u8;
+    fn read_word(&self, addr: u16) -> u16;
     fn write_byte(&mut self, addr: u16, value: u8);
     fn write_word(&mut self, addr: u16, value: u16);
 
@@ -19,6 +20,7 @@ pub trait Memory {
 pub struct Ram {
     pub memory: Vec<u8>
 }
+
 impl Index<u16> for Ram {
     type Output = u8;
     fn index(&self, index:u16) -> &u8 {
@@ -51,10 +53,10 @@ impl Memory for Ram {
         (byte & 0x00F0) >> 4
     }
 
-    fn read_byte(&mut self, addr: u16) -> u8 {
+    fn read_byte(&self, addr: u16) -> u8 {
         self.memory[addr as usize]
     }
-    fn read_word(&mut self, addr:u16) -> u16 {
+    fn read_word(&self, addr:u16) -> u16 {
         (self.read_byte(addr + 1) as u16) << 8 | self.read_byte(addr) as u16
 
     }
@@ -73,6 +75,30 @@ impl Ram {
             memory: vec![0; 0x800],
         }
     }
-
 }
+impl Memory for ExecutionContext {
+    fn high_nibble(byte: u8) -> u8 {
+        byte & 0x000F
+    }
+
+    fn low_nibble(byte: u8) -> u8 {
+        (byte & 0x00F0) >> 4
+    }
+
+    fn read_byte(&self, addr: u16) -> u8 {
+        self.memory[addr]
+    }
+    fn read_word(&self, addr: u16) -> u16 {
+        (self.read_byte(addr + 1) as u16) << 8 | self.read_byte(addr) as u16
+    }
+
+    fn write_byte(&mut self, addr: u16, byte: u8) {
+        self.memory[addr] = byte
+    }
+    fn write_word(&mut self, addr: u16, word: u16) {
+        self.write_byte(addr, word as u8);
+        self.write_byte((addr + 1), (word >> 8) as u8);
+    }
+}
+// TODO Implement mapper for reading ROM memory for CPU
 

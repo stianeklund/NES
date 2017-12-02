@@ -1,9 +1,12 @@
+
 use std::ops::{Range, RangeTo, Index};
 use std::path::Path;
 use std::io::Read;
 use std::fs::File;
 use std::io::{Result, Error};
 use std::str;
+use memory::{Memory, Ram};
+use std::convert;
 
 /* ******************************************************************************************** */
 // iNES HEADER INFORMATION
@@ -43,7 +46,7 @@ impl Default for RomHeader {
             chr_rom_size: 0,
             flags_6: 0,
             flags_7: 0,
-            prg_ram_size: 0,
+            prg_ram_size: 8192,
             chr_ram_size: 0,
             flags_9: 0,
             flags_10: 0,
@@ -66,9 +69,9 @@ impl Cartridge {
 
         Cartridge {
             header: Box::<RomHeader>::default(),
-            prg: vec![0; 0x4000],
-            chr: vec![0; 0x2000],
-            rom: vec![0; 0x10_000],
+            prg: Vec::<u8>::new(),
+            chr: Vec::<u8>::new(),
+            rom: vec![0; 0x85_000],
         }
     }
     pub fn read_rom(&mut self, file: &str) {
@@ -77,20 +80,19 @@ impl Cartridge {
         let mut f = File::open(&path).expect("Couldn't find ROM");
         let mut buf = Vec::new();
 
+
         f.read_to_end(&mut buf);
+        if buf.len() < 16 {
+            panic!("Unable to read ROM header. {}");
+        }
 
         self.rom[..buf.len()].clone_from_slice(&buf[..]);
 
-        println!("Loaded: {:?}, Size(KB): {:?}", path, (buf.len() as f64 * 0.0009765625) as u32);
+        println!("Loaded: {}, Size(KB): {:?}", path.to_str().unwrap(),
+                 (buf.len() as f64 * 0.0009765625) as u32);
     }
-    // TODO Implement proper error handling on parse
-    // I.e we want to not continue reading & parsin if the header does not validate
-    pub fn read_header(&mut self) {
+    pub fn parse_header(&mut self) {
         let rom = &self.rom;
-
-        if rom.len() < 16 {
-            panic!("Unable to read ROM header. {}");
-        }
 
         self.header.magic = Box::from([rom[0], rom[1], rom[2], rom[3]]);
         self.header.sram = 0;
@@ -104,21 +106,51 @@ impl Cartridge {
         self.header.flags_10 = rom[10];
         self.header.zero = Box::from([rom[11], rom[12], rom[13], rom[14], rom[15]]);
 
-       // TODO Research how to check these header types..
-        /* for i in self.header.zero.iter() {
-            if *i == 0 {
-                println!("NES 2.0 Header not found");
-                println!("Zero: {:?}", self.header.zero);
-            } else {
-                println!("NES 2.0 Header found");
-                println!("Zero: {:?}", self.header.zero);
-            }
-        }*/
 
         if self.header.magic.is_ascii() {
-
-            let magic = str::from_utf8(&*self.header.magic).unwrap();
+            let magic = str::from_utf8(&*self.header.magic).unwrap().trim_right_matches('');
             println!("ROM header: {}", magic);
         }
     }
+    // TODO Figure out how to load cart rom into memory banks
+    pub fn load_cartridge(&mut self, file: &str) {
+        self.read_rom(&file);
+
+        let rom = &self.rom;
+
+        // Parse header data
+        self.header.magic = Box::from([rom[0], rom[1], rom[2], rom[3]]);
+        self.header.sram = 0;
+        self.header.prg_rom_size = rom[4];
+        self.header.chr_rom_size = rom[5];
+        self.header.flags_6 = rom[6];
+        self.header.flags_7 = rom[7];
+        self.header.prg_ram_size = rom[8];
+
+        self.header.flags_9 = rom[9];
+        self.header.flags_10 = rom[10];
+        self.header.zero = Box::from([rom[11], rom[12], rom[13], rom[14], rom[15]]);
+
+
+        if self.header.magic.is_ascii() {
+            let magic = str::from_utf8(&*self.header.magic).unwrap().trim_right_matches('');
+            println!("ROM header: {}", magic);
+        }
+
+        println!("PRG ROM {} 16KB Pages", self.header.prg_rom_size);
+        println!("CHR ROM {}  8KB Pages", self.header.chr_rom_size);
+        println!("PRG RAM {}  8KB Pages", self.header.prg_ram_size);
+        self.prg = [rom[4] * 16384].to_vec();
+        self.chr = [rom[5] * 8192].to_vec();
+
+        println!("Loaded, PRG {:?}, CHR {:?}", self.prg, self.chr);
+    }
+    pub fn read_into_memory(&mut self, mut memory: Ram) {
+        let prg = &self.prg;
+        memory.memory[..prg.len()].clone_from_slice(&prg[..]);
+
+        // let prg = self.prg;
+
+    }
 }
+
