@@ -6,7 +6,7 @@ use std::io::Read;
 use std::fs::File;
 use std::io::{Result, Error};
 use std::str;
-use memory::{Memory, Ram};
+use memory::{Ram, Mapper};
 use std::convert;
 
 /* ******************************************************************************************** */
@@ -29,23 +29,23 @@ const CHR_ROM_BANK_SIZE: usize = 8192;
 
 #[derive(Debug)]
 pub struct RomHeader {
-    pub magic: Box<[u8; 4]>,
+    pub magic: [u8; 4],
     sram: u8,
-    pub prg_rom_size: u8,
-    pub chr_rom_size: u8,
+    pub prg_rom_size: usize,
+    pub chr_rom_size: usize,
     pub flags_6: u8,
     flags_7: u8,
     pub prg_ram_size: u8,
     pub chr_ram_size: u8,
     flags_9: u8,
     flags_10: u8,
-    pub zero: Box<[u8; 5]>,
+    pub zero: [u8; 5],
 }
 
 impl Default for RomHeader {
     fn default() -> Self {
         RomHeader {
-            magic: Box::new([0; 4]),
+            magic: [0; 4],
             sram: 0,
             prg_rom_size: 0,
             chr_rom_size: 0,
@@ -55,7 +55,7 @@ impl Default for RomHeader {
             chr_ram_size: 0,
             flags_9: 0,
             flags_10: 0,
-            zero: Box::new([0; 5])
+            zero: [0; 5],
         }
     }
 }
@@ -69,22 +69,29 @@ pub struct Cartridge {
     pub mapper_id: u8           // Mapper ID
 
 }
+impl Mapper for Cartridge {
+    fn read(&mut self, addr: u16) -> u8 { unimplemented!() }
+    fn write(&mut self, addr: u16, byte: u8) { unimplemented!() }
+    fn prg_rom_write(&mut self, addr: u16, byte: u8) { unimplemented!() }
+    fn chr_rom_read(&mut self, addr: u16) -> u8 { unimplemented!() }
+    fn chr_rom_write(&mut self, addr: u16, byte: u8) { unimplemented!() }
+}
 
 impl Cartridge {
     pub fn new() -> Cartridge {
-
         Cartridge {
             header: Box::<RomHeader>::default(),
-            prg: vec![0; 2 * 16000],
-            chr: vec![0; 2 * 8000],
+            prg: vec![0; 2 * PRG_ROM_BANK_SIZE],
+            chr: vec![0; 2 * CHR_ROM_BANK_SIZE],
             rom: vec![0; 0x85_000],
             mapper_id: 0,
         }
     }
     // Returns the mapper ID (for mapper identification)
     pub fn retrieve_mapper_id(&self) -> u8 {
-        (self.header.flags_7 & 0xf0)| (self.header.flags_6 >> 4)
+        (self.header.flags_7 & 0xf0) | (self.header.flags_6 >> 4)
     }
+
     pub fn read_rom(&mut self, file: &str) {
         let path = Path::new(file);
         let mut f = File::open(&path).expect("Couldn't find ROM");
@@ -92,35 +99,36 @@ impl Cartridge {
 
 
         f.read_to_end(&mut buf).expect("i/o error, could not read file to end");
-        self.rom[..buf.len()].clone_from_slice(&buf[..]);
+        self.rom[16..buf.len()].clone_from_slice(&buf[16..]);
 
         println!("\nLoaded: {} Size(KB): {:?}", path.to_str().unwrap(),
                  (buf.len() as f64 * 0.0009765625) as u32);
     }
+
     // Validates parts of the iNES file format
-    pub fn validate_header(&mut self, header_data: &str) -> bool {
-
-        let path = Path::new(header_data);
+    pub fn load_rom(&mut self, header: &str) {
+        let path = Path::new(header);
         let mut file = File::open(&path).expect("Couldn't find ROM");
-        // The iNES header is 16 bytes long
-        let mut header = [0u8; 16];
-        file.read_exact(&mut header);
 
-        self.header.magic = Box::from([header[0], header[1], header[2], header[3]]);
+        // The iNES header is 16 bytes long
+        let mut header = Vec::<u8>::new();
+        file.read_to_end(&mut header).unwrap();
+
+        self.header.magic = [header[0], header[1], header[2], header[3]];
         self.header.sram = 0;
-        self.header.prg_rom_size = header[4];
-        self.header.chr_rom_size = header[5];
+        self.header.prg_rom_size = header[4] as usize;
+        self.header.chr_rom_size = header[5] as usize;
         self.header.flags_6 = header[6];
         self.header.flags_7 = header[7];
         self.header.prg_ram_size = header[8];
         self.header.flags_9 = header[9];
         self.header.flags_10 = header[10];
-        self.header.zero = Box::from([header[11], header[12], header[13], header[14], header[15]]);
+        self.header.zero = [header[11], header[12], header[13], header[14], header[15]];
         self.mapper_id = (header[7] & 0x0f) | (header[6] >> 4);
 
         // Print out the NES character identifier if found
         if self.header.magic.is_ascii() {
-            let magic = str::from_utf8(&*self.header.magic).unwrap().trim_right_matches('');
+            let magic = str::from_utf8(&self.header.magic).unwrap().trim_right_matches('');
             println!("ROM header: {}", magic);
 
             // Print bank sizes
@@ -136,29 +144,15 @@ impl Cartridge {
                 _ => "Unknown mapper",
             };
             println!("Mapper ID {}         ", id);
-
-            return true;
-        } else {
-            return false;
-            panic!("ROM not identified as NES rom");
         }
-    }
+        let mut total: usize = 0;
 
-    // TODO Figure out how to load cart rom into memory banks
-    pub fn load_cartridge(&mut self, file: &str) {
+        // let prg = &header[16.. (16 + self.header.prg_rom_size as usize)];
+        self.rom = header[16..].to_vec();
 
-        if self.validate_header(file) {
-            self.read_rom(file);
-        } else {
-            panic!("Could not validate iNES header");
+        for i in 0..self.rom.len() {
+            self.prg[i] = header[i];
         }
-        let prg_size = self.header.prg_rom_size as usize * PRG_ROM_BANK_SIZE;
-        let chr_size = self.header.chr_rom_size as usize * CHR_ROM_BANK_SIZE;
-        let mut prg = vec![0u8; prg_size].to_vec();
-        let mut chr = vec![0u8; chr_size].to_vec();
-        self.prg = prg;
-        self.chr = chr;
-
     }
 }
 
