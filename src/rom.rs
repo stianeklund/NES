@@ -1,5 +1,6 @@
 
-use std::ops::{Range, RangeTo, Index};
+use std::ops::{Index, IndexMut};
+use std::ops::{Range, RangeTo};
 use std::fmt;
 use std::path::Path;
 use std::io::Read;
@@ -7,6 +8,7 @@ use std::fs::File;
 use std::io::{Result, Error};
 use std::str;
 use memory::{Ram, Mapper};
+use interconnect::{MemoryHandler, Interconnect};
 use std::convert;
 
 /* ******************************************************************************************** */
@@ -59,6 +61,37 @@ impl Default for RomHeader {
         }
     }
 }
+impl Index<u16> for Cartridge {
+    type Output = u8;
+    fn index(&self, index:u16) -> &u8 {
+        &self.prg[index as usize]
+    }
+}
+impl IndexMut<u16> for Cartridge {
+    fn index_mut(&mut self, index:u16) -> &mut u8 {
+        &mut self.prg[index as usize]
+    }
+}
+
+impl MemoryHandler for Cartridge {
+    fn read(&self, addr: u16) -> u8 {
+        let addr = self.mask_addr(addr);
+        match addr {
+            0 ... 0x07ff => self.read(addr),
+            0x0800 ... 0x1fff => self.read(addr),
+            0x8000 ... 0xffff => self.prg[addr as usize - 0x8000],
+            _ => panic!("Unrecognized addr: {:04x}", addr)
+        }
+    }
+    fn write(&mut self, addr: u16, byte: u8) {
+        match addr {
+            0 ... 0x07ff => self.write(addr, byte),
+            0x0800 ... 0x1fff => self.write(addr, byte),
+            0x8000 ... 0xffff => self.write(addr, byte),
+            _ => eprintln!("Unable to write to memory address"),
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct Cartridge {
@@ -69,23 +102,22 @@ pub struct Cartridge {
     pub mapper_id: u8           // Mapper ID
 
 }
-impl Mapper for Cartridge {
-    fn read(&mut self, addr: u16) -> u8 { unimplemented!() }
-    fn write(&mut self, addr: u16, byte: u8) { unimplemented!() }
-    fn prg_rom_write(&mut self, addr: u16, byte: u8) { unimplemented!() }
-    fn chr_rom_read(&mut self, addr: u16) -> u8 { unimplemented!() }
-    fn chr_rom_write(&mut self, addr: u16, byte: u8) { unimplemented!() }
-}
 
 impl Cartridge {
     pub fn new() -> Cartridge {
         Cartridge {
             header: Box::<RomHeader>::default(),
-            prg: vec![0; 2 * PRG_ROM_BANK_SIZE],
+            prg: vec![0; 4 * PRG_ROM_BANK_SIZE],
             chr: vec![0; 2 * CHR_ROM_BANK_SIZE],
             rom: vec![0; 0x85_000],
             mapper_id: 0,
         }
+    }
+    fn mask_addr(&self, addr: u16) -> u16 {
+        let mask = (self.rom.len() - 1) as u16;
+        println!("Mask addr:{:04X}", addr & mask as u16);
+        addr & mask
+
     }
     // Returns the mapper ID (for mapper identification)
     pub fn retrieve_mapper_id(&self) -> u8 {
@@ -145,14 +177,18 @@ impl Cartridge {
             };
             println!("Mapper ID {}         ", id);
         }
-        let mut total: usize = 0;
 
-        // let prg = &header[16.. (16 + self.header.prg_rom_size as usize)];
+        // Mutate rom contents to point to 16 & beyond
         self.rom = header[16..].to_vec();
-
         for i in 0..self.rom.len() {
             self.prg[i] = header[i];
         }
+    }
+    // Get contents of program counter at memory PRG ROM address
+    pub fn get_prg_pc(&self) -> u16 {
+        // TODO Offset here is wrong
+        // (self.prg[(0xfffc as usize)] as u16) | (self.prg[(0xfffd as usize)] as u16) << 8 as u16
+        (self.prg[(0xfffc as usize)] as u16) | (self.prg[(0xfffd as usize)] as u16) << 8 as u16
     }
 }
 

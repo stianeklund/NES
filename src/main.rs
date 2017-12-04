@@ -7,8 +7,8 @@ mod opcode;
 mod memory;
 mod cpu;
 
+use interconnect::{Interconnect, MemoryHandler};
 use cpu::ExecutionContext;
-use interconnect::Interconnect;
 
 fn main() {
 
@@ -19,17 +19,17 @@ fn main() {
     }
     let file = &args[1];
 
-    let mut exec = ExecutionContext::new();
-    exec.cart.load_rom(&file);
-    for _ in 0..10 {
-        exec.decode();
-        println!("{:?}", exec.cpu);
+    // TODO Cleanup use interconnect instead
+    // Make CPU more ergonomic to use.
+    // let mut inter = Interconnect::new();
+
+    let mut cpu = ExecutionContext::new();
+
+    cpu.cart.load_rom(&file);
+    let pc = cpu.read(cpu.cart.get_prg_pc());
+    println!("PC:{:04x}", pc);
+    cpu.reg.pc = pc as u16; // cpu.cart.get_prg_pc();
+    for _ in 0..5 {
+        cpu.decode();
     }
-
-
-
-
-
-
-
 }

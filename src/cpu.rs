@@ -1,20 +1,32 @@
 use std::fmt;
 use opcode::Instruction;
-use super::memory::{Ram, Mapper, MemoryHandler};
-use super::rom::Cartridge;
-
-impl Mapper for ExecutionContext {
-    fn read(&mut self, addr: u16) -> u8 { self.ram[addr] }
-    fn write(&mut self, addr: u16, byte: u8) { self.ram[addr] = byte }
-
-    fn prg_rom_write(&mut self, addr: u16, byte: u8) { unimplemented!() }
-    fn chr_rom_read(&mut self, addr: u16) -> u8 { unimplemented!() }
-    fn chr_rom_write(&mut self, addr: u16, byte: u8) { unimplemented!() }
-}
+use interconnect::MemoryHandler;
+use memory::{Ram, Mapper};
+use rom::Cartridge;
 
 impl MemoryHandler for ExecutionContext {
-    fn read_byte(&mut self, addr: u16) -> u8 { self.ram.memory[addr as usize] }
-    fn write_byte(&mut self, addr: u16, byte: u8) { self.ram.memory[addr as usize] = byte }
+    fn read(&self, addr: u16) -> u8 {
+        match addr {
+            // See https://wiki.nesdev.com/w/index.php/CPU_memory_map
+            0...0x07ff => self.ram.memory[addr as usize] as u8,
+            // 0...0x2007 => self.ppu[addr] // TODO
+            // RAM Mirror
+            0x0800...0x1fff => self.ram.memory[addr as usize] as u8,
+            // PRG ROM
+            0x8000...0xffff => self.cart.prg[addr as usize - 0x8000] as u8,
+            _ => panic!("Unrecognized addr: {:04x}", addr)
+        }
+
+    }
+
+    fn write(&mut self, addr: u16, byte: u8) {
+        match addr {
+            0...0x07ff => self.ram.memory[addr as usize] = byte,
+            0x0800...0x1fff => self.ram.memory[addr as usize] = byte,
+            0x8000...0xffff => self.cart.prg[addr as usize - 0x8000] = byte,
+            _ => eprintln!("Unable to write to memory address"),
+        };
+    }
 }
 
 #[derive(Debug)]
@@ -55,10 +67,10 @@ pub struct Registers {
 }
 
 impl Registers {
-    pub fn default() -> Self {
+    pub fn new() -> Registers {
         Registers {
             pc: 0,
-            sp:0xfd,
+            sp:0,
             a: 0,
             x: 0,
             y: 0,
@@ -77,11 +89,11 @@ pub struct Cpu {
 
 impl fmt::Debug for Cpu {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(f, "{}\t{}\t{}\t{}\t{}\t{}{} {} {} {} {}",
-                 "Opcode","PC","SP","A","X","Y\t", "N","D","I","Z","C");
-        writeln!(f, "{:04x}\t{:04x}\t{:04x}\t{:02x}\t{:04x}\t{:04x}\t{} {} {} {} {}",
+        writeln!(f, "{}\t{}\t{}\t{}\t{}\t{}{} {} {} {} {} {}",
+                 "Opcode","PC","SP","A","X","Y\t", "N","D","I","Z","C","Cycles");
+        writeln!(f, "{:04x}\t{:04x}\t{:04x}\t{:02x}\t{:04x}\t{:04x}\t{} {} {} {} {} {}",
                  self.opcode, self.reg.pc, self.reg.sp, self.reg.a, self.reg.x, self.reg.y,
-                 self.flags.negative, self.flags.decimal, self.flags.interrupt, self.flags.zero, self.flags.carry)
+                 self.flags.negative, self.flags.decimal, self.flags.interrupt, self.flags.zero, self.flags.carry, self.cycles)
     }
 }
 
@@ -90,7 +102,7 @@ impl Cpu {
         Cpu {
             reg: Registers {
                 pc: 0,
-                sp: 0xfd,
+                sp: 0,
                 a: 0,
                 x: 0,
                 y: 0,
@@ -116,6 +128,7 @@ pub struct ExecutionContext {
     pub cpu: Cpu,
     pub cart: Cartridge,
     pub ram: Ram,
+    pub reg: Registers
 }
 
 impl ExecutionContext {
@@ -124,6 +137,7 @@ impl ExecutionContext {
             cpu: Cpu::new(),
             cart: Cartridge::new(),
             ram: Ram::new(),
+            reg: Registers::new()
         }
     }
 
@@ -131,11 +145,10 @@ impl ExecutionContext {
     fn adv_cycles(&mut self, t: u16) { self.cpu.cycles += t; }
 
     pub fn decode(&mut self) {
-        Instruction::decode(self.cart.prg[self.cpu.reg.pc as usize]);
+        // Instruction::decode(self.cart.prg[self.cpu.reg.pc as usize]);
 
-        // We need to implement a way to load PRG rom into work ram?
-        let opcode = self.cart.prg[self.cpu.reg.pc as usize];
-        // let opcode = self.ram.memory[self.cpu.reg.pc as usize];
+        // let opcode = self.read(self.cpu.reg.pc);
+        let opcode = self.cart.prg[self.reg.pc as usize];
 
         match opcode {
             0x00 => self.brk(),
@@ -155,8 +168,10 @@ impl ExecutionContext {
             0x73 => self.nop(),
             _ => eprintln!("Not implemented"),
         }
-        self.cpu.opcode = opcode;
+        self.cpu.opcode = opcode as u8;
         self.adv_pc(1);
+
+        println!("{:?}", self.cpu);
     }
     fn adc(&mut self) {
         println!("ADC");
@@ -258,7 +273,8 @@ impl ExecutionContext {
     }
     fn jmp(&mut self) {
         println!("JMP");
-        self.cpu.reg.pc = self.ram.read_word(self.cpu.reg.pc);
+        let addr = self.cpu.reg.pc + 2;
+        self.cpu.reg.pc = self.read_word(addr);
         self.adv_cycles(3);
 
     }
