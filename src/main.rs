@@ -9,7 +9,6 @@ mod cpu;
 
 use interconnect::{Interconnect, MemoryHandler};
 use cpu::ExecutionContext;
-
 fn main() {
 
     let args: Vec<String> = std::env::args().collect();
@@ -22,13 +21,12 @@ fn main() {
     // TODO Cleanup use interconnect instead
     // Make CPU more ergonomic to use.
     // let mut inter = Interconnect::new();
-
     let mut cpu = ExecutionContext::new();
 
     cpu.cart.load_rom(&file);
-    let pc = cpu.read(cpu.cart.get_prg_pc());
-    println!("PC:{:04x}", pc);
-    cpu.reg.pc = pc as u16; // cpu.cart.get_prg_pc();
+    // Get word at memory location 0xfffc & set PC to that value
+    cpu.setup_pc(0xfffc);
+
     for _ in 0..5 {
         cpu.decode();
     }

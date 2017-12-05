@@ -37,7 +37,7 @@ impl Debug for Ram {
 }
 
 impl Ram {
-    pub fn new() -> Ram {
+    pub fn default() -> Self {
         Ram {
             memory: Box::new([0; 0x0800]),
         }
