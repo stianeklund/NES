@@ -75,9 +75,10 @@ impl IndexMut<u16> for Cartridge {
 
 impl MemoryHandler for Cartridge {
     fn read(&self, addr: u16) -> u8 {
+        // let addr = self.mask_addr(addr);
         match addr {
-            0 ... 0x07ff => panic!("Reading {:04x} from Cartridge is not supported", addr),// self.ram.memory[addr as usize],
-            0x0800 ... 0x1fff => panic!("Reading {:04x} from Cartridge is not supported", addr), // self.ram.memory[addr as usize & 0x07ff],
+            0 ... 0x07ff => panic!("Trying to read RAM from Cartridge"),
+            0x0800 ... 0x1fff => panic!("Trying to read RAM Mirror from Cartridge"),
             0x8000 ... 0xffff => self.prg[addr as usize & 0x7fff],
             _ => panic!("Unrecognized read address: {:04x}", addr)
         }
@@ -86,21 +87,19 @@ impl MemoryHandler for Cartridge {
         (self.read(addr) as u16) | ((self.read(addr + 1) as u16) << 8)
 
     }
-
     fn write(&mut self, addr: u16, byte: u8) {
         match addr {
-            0...0x07ff => panic!("Writing to {:04x} from Cartridge is not supported", addr), // self.ram.memory[addr as usize] = byte,
-            0x0800...0x1fff => panic!("Writing to {:04x} from Cartridge is not supported", addr), // self.ram.memory[addr as usize & 0x07ff] = byte,
-            0x8000...0xffff => self.prg[addr as usize & 0x7fff] = byte,
-            _ => eprintln!("Unrecognized write address: {:04x}", addr),
-        };
+            0 ... 0x07ff => self.write(addr, byte),
+            0x0800 ... 0x1fff => self.write(addr, byte),
+            0x8000 ... 0xffff => self.write(addr, byte),
+            _ => eprintln!("Unable to write to memory address"),
+        }
     }
 }
 
-
 #[derive(Debug)]
 pub struct Cartridge {
-    pub header: Box<RomHeader>, // iNES Header
+    pub header: RomHeader,      // iNES Header
     pub prg: Vec<u8>,           // A copy of the games program rom? Why? Is this for mirroring?
     pub chr: Vec<u8>,           // Copy of the games pattern table ROM or RAM for save states.
     pub rom: Vec<u8>,           // Temporary copy of ROM contents
@@ -109,20 +108,19 @@ pub struct Cartridge {
 }
 
 impl Cartridge {
-    pub fn default() -> Cartridge {
+    pub fn default() -> Self {
         Cartridge {
-            header: Box::<RomHeader>::default(),
-            prg: vec![0; 2 * PRG_ROM_BANK_SIZE],
+            header: RomHeader::default(),
+            prg: vec![0; 4 * PRG_ROM_BANK_SIZE],
             chr: vec![0; 2 * CHR_ROM_BANK_SIZE],
             rom: vec![0; 0x85_000],
             mapper_id: 0,
         }
     }
-    pub fn mask_addr(&self, addr: u16) -> u16 {
+    fn mask_addr(&self, addr: u16) -> u16 {
         let mask = (self.rom.len() - 1) as u16;
         println!("Mask addr:{:04X}", addr & mask as u16);
         addr & mask
-
     }
     // Returns the mapper ID (for mapper identification)
     pub fn retrieve_mapper_id(&self) -> u8 {
@@ -142,36 +140,19 @@ impl Cartridge {
                  (buf.len() as f64 * 0.0009765625) as u32);
     }
 
-    // Validates parts of the iNES file format
-    pub fn load_rom(&mut self, header: &str) {
-        let path = Path::new(header);
-        let mut file = File::open(&path).expect("Couldn't find ROM");
-
+    fn validate_header(&mut self, header: &Vec<u8>) -> Result<RomHeader> {
         // The iNES header is 16 bytes long
-        let mut header = Vec::<u8>::new();
-        file.read_to_end(&mut header).unwrap();
-
-        self.header.magic = [header[0], header[1], header[2], header[3]];
-        self.header.sram = 0;
-        self.header.prg_rom_size = header[4] as usize;
-        self.header.chr_rom_size = header[5] as usize;
-        self.header.flags_6 = header[6];
-        self.header.flags_7 = header[7];
-        self.header.prg_ram_size = header[8];
-        self.header.flags_9 = header[9];
-        self.header.flags_10 = header[10];
-        self.header.zero = [header[11], header[12], header[13], header[14], header[15]];
         self.mapper_id = (header[7] & 0x0f) | (header[6] >> 4);
+        self.header.magic = [header[0], header[1], header[2], header[3]];
 
-        // Print out the NES character identifier if found
         if self.header.magic.is_ascii() {
             let magic = str::from_utf8(&self.header.magic).unwrap().trim_right_matches('');
             println!("ROM header: {}", magic);
 
             // Print bank sizes
-            println!("PRG ROM {} 16KB Pages", self.header.prg_rom_size);
-            println!("CHR ROM {}  8KB Pages", self.header.chr_rom_size);
-            println!("PRG RAM {}  8KB Pages", self.header.prg_ram_size);
+            println!("PRG ROM {} 16KB Pages", header[4]);
+            println!("CHR ROM {}  8KB Pages", header[5]);
+            println!("PRG RAM {}  8KB Pages", header[8]);
 
             // TODO Research mappers & add more
             let id = match self.mapper_id {
@@ -183,11 +164,43 @@ impl Cartridge {
             println!("Mapper ID {}         ", id);
         }
 
-        // Mutate rom contents to point to 16 & beyond
-        self.rom = header[16..].to_vec();
-        for i in 0..self.rom.len() {
-            self.prg[i] = self.rom[i];
-        }
+        // Return header information
+        Ok(RomHeader {
+            magic: [header[0], header[1], header[2], header[3]],
+            sram: 0,
+            prg_rom_size: header[4] as usize,
+            chr_rom_size: header[5] as usize,
+            flags_6: header[6],
+            flags_7: header[7],
+            prg_ram_size: header[8],
+            chr_ram_size: 0,
+            flags_9: 0,
+            flags_10: header[9],
+            zero: [header[11], header[12], header[13], header[14], header[15]],
+        })
+    }
+
+    // Validates parts of the iNES file format
+    pub fn load_rom(&mut self, mut file: &File) -> Result<Cartridge> {
+
+        // The iNES header is 16 bytes long
+        let mut prg_rom = vec![0u8; 2 * PRG_ROM_BANK_SIZE];
+        file.read(&mut prg_rom).unwrap();
+        let header = self.validate_header(&prg_rom).unwrap();
+
+        Ok(Cartridge {
+            header,
+            prg: prg_rom,
+            chr: Vec::new(),
+            rom: Vec::new(),
+            mapper_id: 0,
+        })
+    }
+
+    // Get contents of program counter at memory PRG ROM address
+    pub fn get_prg_pc(&self) -> u16 {
+        // TODO Offset here is wrong
+        (self.prg[(0xfffc as usize)] as u16) | (self.prg[(0xfffd as usize)] as u16) << 8 as u16
     }
 }
 

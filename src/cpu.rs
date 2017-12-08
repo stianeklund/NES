@@ -1,17 +1,22 @@
 use std::fmt;
-use super::opcode::Instruction;
-use super::interconnect::{MemoryHandler, Interconnect};
-use super::memory::{Ram, Mapper};
-use super::rom::Cartridge;
+use opcode::Instruction;
+use interconnect::MemoryHandler;
+use memory::{Ram, Mapper};
+use rom::Cartridge;
 
 impl MemoryHandler for ExecutionContext {
     fn read(&self, addr: u16) -> u8 {
         match addr {
-            0 ... 0x07ff => self.ram.memory[addr as usize],
-            0x0800 ... 0x1fff => self.ram.memory[addr as usize & 0x07ff],
-            0x8000 ... 0xffff => self.cart.prg[addr as usize & 0x7fff],
-            _ => panic!("Unrecognized read address: {:04x}", addr)
+            // See https://wiki.nesdev.com/w/index.php/CPU_memory_map
+            0...0x07ff => self.ram.memory[addr as usize] as u8,
+            // 0...0x2007 => self.ppu[addr] // TODO
+            // RAM Mirror
+            0x0800...0x1fff => self.ram.memory[addr as usize & 0x07ff] as u8,
+            // PRG ROM
+            0x8000...0xffff => self.cart.prg[addr as usize & 0x7fff] as u8,
+            _ => panic!("Unrecognized addr: {:04x}", addr)
         }
+
     }
 
     fn write(&mut self, addr: u16, byte: u8) {
@@ -19,7 +24,7 @@ impl MemoryHandler for ExecutionContext {
             0...0x07ff => self.ram.memory[addr as usize] = byte,
             0x0800...0x1fff => self.ram.memory[addr as usize & 0x07ff] = byte,
             0x8000...0xffff => self.cart.prg[addr as usize & 0x7fff] = byte,
-            _ => eprintln!("Unrecognized write address: {:04x}", addr),
+            _ => eprintln!("Unable to write to memory address"),
         };
     }
 }
@@ -93,7 +98,7 @@ impl fmt::Debug for Cpu {
 }
 
 impl Cpu {
-    pub fn default() -> Self {
+    pub fn default() -> Cpu {
         Cpu {
             reg: Registers {
                 pc: 0,
@@ -120,25 +125,21 @@ impl Cpu {
 }
 
 pub struct ExecutionContext {
-pub cpu: Cpu,
-pub cart: Cartridge,
-pub ram: Ram,
-pub reg: Registers
+    pub cpu: Cpu,
+    pub cart: Cartridge,
+    pub ram: Ram,
+    pub reg: Registers
 }
 
 impl ExecutionContext {
-pub fn new() -> ExecutionContext {
-    ExecutionContext {
-        cpu: Cpu::default(),
-        cart: Cartridge::default(),
-        ram: Ram::default(),
-        reg: Registers::default()
+    pub fn new() -> ExecutionContext {
+        ExecutionContext {
+            cpu: Cpu::default(),
+            cart: Cartridge::default(),
+            ram: Ram::default(),
+            reg: Registers::default()
+        }
     }
-}
-
-    fn adv_pc(&mut self, t: u16) { self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(t); }
-    fn adv_cycles(&mut self, t: u16) { self.cpu.cycles += t; }
-
     pub fn setup_pc(&mut self, addr: u16) {
         match addr {
             0 ... 0x07ff => {
@@ -158,13 +159,15 @@ pub fn new() -> ExecutionContext {
         self.read_word(addr);
         self.reg.pc = addr;
     }
-    pub fn decode(&mut self) {
 
+    fn adv_pc(&mut self, t: u16) { self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(t); }
+    fn adv_cycles(&mut self, t: u16) { self.cpu.cycles += t; }
+
+    pub fn decode(&mut self) {
         // Instruction::decode(self.cart.prg[self.cpu.reg.pc as usize]);
 
-        // Ideally we can use MemoryHandler's read impl here?
-        let opcode = self.read(self.reg.pc);
-        // let opcode = self.cart.prg[self.reg.pc as usize & 0x7fff];
+        // let opcode = self.read(self.cpu.reg.pc);
+        let opcode = self.cart.prg[self.reg.pc as usize];
 
         match opcode {
             0x00 => self.brk(),
@@ -174,7 +177,6 @@ pub fn new() -> ExecutionContext {
             0xa2 => self.ldax(),
             0x4e => self.lsr(),
             0x1a => self.rol(),
-            0x16 => self.asl(),
             0x20 => self.jsr(),
             0x5a => self.nop(),
             0x61 => self.rts(),
@@ -192,18 +194,16 @@ pub fn new() -> ExecutionContext {
     }
     fn adc(&mut self) {
         println!("ADC");
+        self.adv_pc(1);
         let mem_value = self.ram.memory[self.cpu.reg.pc as usize];
         let result = (self.cpu.reg.a as u16).wrapping_add(mem_value as u16).wrapping_add(self.cpu.flags.carry as u16);
         // TODO Flags
         self.cpu.flags.carry = (result & 0x0100) as u8;
-        self.adv_cycles(3);
-        self.adv_pc(1);
+        self.adv_cycles(3)
     }
     // Arithmetic shift left zero page
     fn asl(&mut self) {
-        println!("ASL a8");
-        // TODO Implement addressing modes
-        // opcode 0x16 is ASL a8,X
+        println!("ASL");
         let carry = (self.cpu.reg.a & 1) != 0;
         let value = self.ram.memory[self.cpu.reg.pc as usize];
         // Check if 7th bit has been set
@@ -217,7 +217,7 @@ pub fn new() -> ExecutionContext {
         self.cpu.flags.zero;
         self.cpu.flags.carry = carry as u8;
         self.adv_pc(1);
-        self.adv_cycles(5);
+        self.adv_cycles(6);
     }
     fn nop(&mut self) {
         self.adv_pc(1);
@@ -266,14 +266,14 @@ pub fn new() -> ExecutionContext {
         self.cpu.flags.negative;
         self.cpu.flags.zero;
         self.cpu.flags.carry = carry as u8;
-        self.adv_pc(1);
+        self.adv_pc(2);
         self.adv_cycles(6);
     }
 
     fn bpl(&mut self) {
         println!("BPL");
         // Cycles 3+ / 2
-        self.adv_pc(1);
+        self.adv_pc(2);
         self.adv_cycles(3);
     }
     fn rol(&mut self) {
@@ -293,7 +293,7 @@ pub fn new() -> ExecutionContext {
     fn jmp(&mut self) {
         println!("JMP");
         let addr = self.cpu.reg.pc + 2;
-        self.cpu.reg.pc = addr;
+        self.cpu.reg.pc = self.read_word(addr);
         self.adv_cycles(3);
 
     }
