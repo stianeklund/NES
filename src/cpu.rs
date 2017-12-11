@@ -128,7 +128,6 @@ pub struct ExecutionContext {
     pub cpu: Cpu,
     pub cart: Cartridge,
     pub ram: Ram,
-    pub reg: Registers
 }
 
 impl ExecutionContext {
@@ -137,27 +136,26 @@ impl ExecutionContext {
             cpu: Cpu::default(),
             cart: Cartridge::default(),
             ram: Ram::default(),
-            reg: Registers::default()
         }
     }
     pub fn setup_pc(&mut self, addr: u16) {
-        match addr {
+        let return_addr = match addr {
             0 ... 0x07ff => {
-                println!("Addr RAM:{:04x}", self.ram.memory[addr as usize]);
+                println!("\n Addr RAM:{:04x}", self.ram.memory[addr as usize]);
                 self.ram.memory[addr as usize]
             },
             0x0800 ... 0x1fff => {
-                println!("Addr RAM Mirror:{:04x}", self.ram.memory[addr as usize & 0x07ff]);
+                println!("\n Addr RAM Mirror:{:04x}", self.ram.memory[addr as usize & 0x07ff]);
                 self.ram.memory[addr as usize & 0x07ff]
             },
             0x8000 ... 0xffff => {
-                println!("Addr PRG:{:04x}", self.cart.prg[addr as usize & 0x7fff]);
-                self.cart.prg[addr as usize & 0x7fff]
+                println!("\n Indexed addr PRG:{:04x}, addr:{:04x}", self.cart.prg[addr as usize & 0x7fff], addr);
+                self.cart.prg[(((addr as u16) << 8) | (addr as u16)) as usize & 0x7fff]
+                // self.cart.prg[addr as usize & 0x7fff]
             },
             _ => panic!("Unrecognized read address: {:04x}", addr)
         };
-        self.read_word(addr);
-        self.reg.pc = addr;
+        self.cpu.reg.pc = return_addr as u16;
     }
 
     fn adv_pc(&mut self, t: u16) { self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(t); }
@@ -165,9 +163,9 @@ impl ExecutionContext {
 
     pub fn decode(&mut self) {
         // Instruction::decode(self.cart.prg[self.cpu.reg.pc as usize]);
-
-        // let opcode = self.read(self.cpu.reg.pc);
-        let opcode = self.cart.prg[self.reg.pc as usize];
+        let opcode = self.read(self.cpu.reg.pc);
+        // let opcode = self.cart.prg[self.cpu.reg.pc as usize];
+        println!("Opcode:{:04x}", opcode);
 
         match opcode {
             0x00 => self.brk(),
