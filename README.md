@@ -1,2 +1,2 @@
 # NES
-A Nintendo Entertainment System & Famicom emulator written in Rust
+A Nintendo Entertainment System emulator written in Rust

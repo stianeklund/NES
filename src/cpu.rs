@@ -14,7 +14,7 @@ impl MemoryHandler for ExecutionContext {
             // RAM Mirror
             0x0800...0x1fff => self.ram.memory[addr as usize & 0x07ff] as u8,
             // PRG ROM
-            0x8000...0xffff => self.cart.prg[addr as usize & 0x7fff] as u8,
+            0x8000...0xffff => self.cart.prg[addr as usize & 0x3fff] as u8,
             _ => panic!("Unrecognized addr: {:04x}", addr)
         }
 
@@ -71,7 +71,7 @@ impl Registers {
     pub fn default() -> Self {
         Registers {
             pc: 0,
-            sp:0,
+            sp: 0,
             a: 0,
             x: 0,
             y: 0,
@@ -92,7 +92,7 @@ impl fmt::Debug for Cpu {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(f, "{}\t{}\t{}\t{}\t{}\t{}{} {} {} {} {} {}",
                  "Opcode","PC","SP","A","X","Y\t", "N","D","I","Z","C","Cycles")?;
-        writeln!(f, "{:04x}\t{:04x}\t{:04x}\t{:02x}\t{:04x}\t{:04x}\t{} {} {} {} {} {}",
+        writeln!(f, "{:04x}\t{:04x}\t{:04x}\t{:02x}\t{:02x}\t{:02x}\t{} {} {} {} {} {}",
                  self.opcode, self.reg.pc, self.reg.sp, self.reg.a, self.reg.x, self.reg.y,
                  self.flags.negative, self.flags.decimal, self.flags.interrupt, self.flags.zero, self.flags.carry, self.cycles)?;
         Ok(())
@@ -104,7 +104,7 @@ impl Cpu {
         Cpu {
             reg: Registers {
                 pc: 0,
-                sp: 0,
+                sp: 0xfd,
                 a: 0,
                 x: 0,
                 y: 0,
@@ -140,56 +140,43 @@ impl ExecutionContext {
             ram: Ram::default(),
         }
     }
-    pub fn setup_pc(&mut self, addr: u16) {
-        let return_addr = match addr {
-            0 ... 0x07ff => {
-                println!("\n Addr RAM:{:04x}", self.ram.memory[addr as usize]);
-                self.ram.memory[addr as usize]
-            },
-            0x0800 ... 0x1fff => {
-                println!("\n Addr RAM Mirror:{:04x}", self.ram.memory[addr as usize & 0x07ff]);
-                self.ram.memory[addr as usize & 0x07ff]
-            },
-            0x8000 ... 0xffff => {
-                println!("\n Indexed addr PRG:{:04x}, addr:{:04x}", self.cart.prg[addr as usize & 0x7fff], addr);
-                // self.cart.prg[addr as usize & 0x7fff]
-                // Read word in prg rom
-                self.cart.prg[(((addr as u16) << 8) | (addr as u16)) as usize & 0x7fff]
-            },
-            _ => panic!("Unrecognized read address: {:04x}", addr)
-        };
-        self.cpu.reg.pc = return_addr as u16;
-    }
-
     fn adv_pc(&mut self, t: u16) { self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(t); }
     fn adv_cycles(&mut self, t: u16) { self.cpu.cycles += t; }
 
     pub fn decode(&mut self) {
         // Instruction::decode(self.cart.prg[self.cpu.reg.pc as usize]);
-        // let opcode = self.read(self.cpu.reg.pc);
-
-        // Read opcode from program memory
-        let opcode = self.cart.prg[self.cpu.reg.pc as usize];
-
-        // println!("PRG Contents:{:?}", self.cart.prg);
-
+        let opcode = self.read(self.cpu.reg.pc);
 
         match opcode {
             0x00 => self.brk(),
             0x01 => self.bpl(),
+            0x04 => self.rti(),
             0x06 => self.asl(),
+            0xa0 => self.ldy(),
             0xa1 => self.lda(),
             0xa2 => self.ldax(),
+            0xad => self.lda(),
+            0xa9 => self.lda(),
+            0xb8 => self.clv(),
             0x4e => self.lsr(),
             0x1a => self.rol(),
             0x20 => self.jsr(),
             0x5a => self.nop(),
-            0x61 => self.rts(),
+            0x60 => self.rts(),
+            0x61 => self.adc(),
             0x65 => self.adc(),
             0x6c => self.jmp(),
+            0x6e => self.lsr(),
             0x70 => self.bvs(),
             0x72 => self.nop(),
             0x73 => self.nop(),
+            0x78 => self.sei(),
+            0x8d => self.sta(),
+            0x9a => self.txs(),
+            0xc3 => self.dcp(),
+            0xd3 => self.dcp(),
+            0xd8 => self.cld(),
+            0xdf => self.dcp(),
             _ => eprintln!("Not implemented"),
         }
         self.cpu.opcode = opcode as u8;
@@ -243,24 +230,82 @@ impl ExecutionContext {
             self.adv_cycles(2);
         }
     }
+    // Clear decimal
+    fn cld(&mut self) {
+        println!("CLD");
+        self.cpu.flags.decimal = 0;
+        self.adv_cycles(2);
+    }
+    // Clear overflow
+    fn clv(&mut self) {
+        println!("CLV");
+        self.cpu.flags.overflow = 0;
+        self.adv_cycles(2);
+    }
+    // Decrement & compare
+    fn dcp(&mut self) {
+        println!("DCP (illegal opcode)");
+        let data = self.cart.prg[self.cpu.reg.pc as usize + 2];
+        println!("Data:{:04x}", data);
+        self.adv_pc(1);
+        self.adv_cycles(7);
+    }
     // LDA A8
     fn lda(&mut self) {
-        // let imm = self.read_byte(self.cpu.reg.pc + 1);
-        let imm = self.ram[self.cpu.reg.pc + 1];
-        self.cpu.reg.a = imm as u8;
+        println!("LDA A8");
+        let d8 = self.read(self.cpu.reg.pc + 1);
+        self.cpu.reg.a = d8 as u8;
         self.cpu.flags.zero == self.cpu.reg.a;
+        self.cpu.flags.negative != self.cpu.reg.a;
         self.adv_pc(1);
         self.adv_cycles(3)
     }
     // LDA (A8, X)
     fn ldax(&mut self) {
         println!("LDA (A8, X)");
-        self.adv_cycles(1);
+        let a8 = self.read(self.cpu.reg.pc + 1);
+        self.cpu.reg.x = a8;
+        self.cpu.flags.zero == a8 & 0xff;
+        self.cpu.flags.negative != a8;
+
+        self.adv_pc(1);
         self.adv_cycles(6);
     }
     // LDA (A8, Y)
     fn lday(&mut self) {
         println!("LDA (A8, Y)");
+        let a8 = self.read(self.cpu.reg.pc + 2);
+        self.cpu.reg.y = a8;
+        self.cpu.flags.zero == a8 & 0xff;
+        self.cpu.flags.negative != a8 & 0xff;
+        self.adv_cycles(4);
+        self.adv_pc(2);
+
+    }
+    // LDY Load Y Register (d8)
+    fn ldy(&mut self) {
+        // TODO Bitmasks
+        println!("LDY D8");
+        let d8 = self.read(self.cpu.reg.pc + 1);
+        self.cpu.reg.y = d8;
+        self.cpu.flags.zero == d8 & 0xff;
+        self.cpu.flags.negative != d8;
+        self.adv_cycles(2);
+        self.adv_pc(1);
+
+    }
+    // Load X Register
+    fn ldx(&mut self) {
+        println!("LDX D8");
+        let d8 = self.read(self.cpu.reg.pc + 1);
+        self.cpu.reg.x = d8;
+        self.cpu.flags.zero == d8;
+        self.cpu.flags.negative != d8;
+        self.adv_pc(1);
+        self.adv_cycles(3);
+        println!("LDX");
+        self.adv_cycles(2);
+        self.adv_pc(1);
     }
     // Logical Shift Right
     fn lsr(&mut self) {
@@ -287,7 +332,31 @@ impl ExecutionContext {
         self.adv_cycles(5);
     }
     fn rts(&mut self) {
+        println!("RTS");
         self.adv_cycles(6);
+    }
+    fn rti(&mut self) {
+        println!("RTI");
+        self.adv_cycles(6);
+    }
+    fn sta(&mut self) {
+        // Ex: Absolute: STA $4400 Hex: $8D Len: 3 Cycles:4
+        println!("STA Absolute");
+        let addr = self.read_word(self.cpu.reg.pc + 2);
+        let a = self.cpu.reg.a;
+        // Write value of accumulator to memory address
+        self.write(addr, a);
+        self.adv_cycles(4);
+        self.adv_pc(2);
+
+
+    }
+    // Transfer X to Stack Pointer
+    fn txs(&mut self) {
+        println!("TXS");
+        // TODO TXS is like POP?
+        self.cpu.reg.sp = self.cpu.reg.x;
+        self.adv_cycles(2);
     }
 
     fn push_stack(&mut self, value: u16) {
@@ -298,8 +367,11 @@ impl ExecutionContext {
     // Jump to Subroutine
     fn jsr(&mut self) {
         // Get value at word in PC & advance pc by 2
+        let data = self.cart.prg[self.cpu.reg.pc as usize + 2];
         let addr = self.read_word(self.cpu.reg.pc);
-        println!("JSR");
+        println!("JSR \n");
+        println!("JSR Data:{:04x}", data);
+
         self.adv_pc(2);
 
         // Push to stack
@@ -313,5 +385,10 @@ impl ExecutionContext {
         let addr = self.cpu.reg.pc + 2;
         self.cpu.reg.pc = self.read_word(addr);
         self.adv_cycles(3);
+    }
+    fn sei(&mut self) {
+        println!("SEI");
+        self.cpu.flags.interrupt = 1;
+        self.adv_cycles(2);
     }
 }

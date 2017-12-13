@@ -79,7 +79,7 @@ impl MemoryHandler for Cartridge {
         match addr {
             0 ... 0x07ff => panic!("Trying to read RAM from Cartridge"),
             0x0800 ... 0x1fff => panic!("Trying to read RAM Mirror from Cartridge"),
-            0x8000 ... 0xffff => self.prg[addr as usize & 0x7fff],
+            0x8000 ... 0xffff => self.prg[addr as usize & 0x3fff],
             _ => panic!("Unrecognized read address: {:04x}", addr)
         }
     }
@@ -161,7 +161,7 @@ impl Cartridge {
                 2 => "UxROM",
                 _ => "Unknown mapper",
             };
-            println!("Mapper ID {}         ", id);
+            println!("Mapper ID:{}         ", id);
         }
 
         // Return header information
@@ -184,12 +184,17 @@ impl Cartridge {
     pub fn load_rom(&mut self, mut file: &File) {
 
         // The iNES header is 16 bytes long
-        let mut rom = vec![0u8; 1 * PRG_ROM_BANK_SIZE];
+        let mut rom = vec![0u8; 2 * PRG_ROM_BANK_SIZE];
         file.read(&mut rom).expect("Could not read rom file");
 
         let header = self.validate_header(&rom).unwrap();
         self.header = header;
-        self.prg[16..rom.len()].clone_from_slice(&rom[16..]);
+        // self.prg[16..rom.len()].clone_from_slice(&rom[16..]);
+        // .clone_from_slice(&rom[0x10..0x400F]);
+        let rom_len = rom.len();
+        for i in 0..0x4000 {
+            self.prg[i as usize] = rom[(0x10 + i) as usize];
+        }
     }
 
     // Get contents of program counter at memory PRG ROM address
