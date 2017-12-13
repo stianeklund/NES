@@ -181,26 +181,15 @@ impl Cartridge {
     }
 
     // Validates parts of the iNES file format
-    pub fn load_rom(&mut self, mut file: &File) -> Result<Cartridge> {
+    pub fn load_rom(&mut self, mut file: &File) {
 
         // The iNES header is 16 bytes long
         let mut rom = vec![0u8; 1 * PRG_ROM_BANK_SIZE];
         file.read(&mut rom).expect("Could not read rom file");
+
         let header = self.validate_header(&rom).unwrap();
-
-        let mut prg = vec![0; 16384];
-        // PRG still contains 0's at the beginning, is this because of vec.len()
-        // or are we still in the zero padding of the header?
-        prg[16..rom.len()].clone_from_slice(&rom[16..]);
-        // println!("PRG Contents:{:?}", prg);
-
-        Ok(Cartridge {
-            header,
-            prg,
-            chr: Vec::new(),
-            rom: Vec::new(),
-            mapper_id: 0,
-        })
+        self.header = header;
+        self.prg[16..rom.len()].clone_from_slice(&rom[16..]);
     }
 
     // Get contents of program counter at memory PRG ROM address

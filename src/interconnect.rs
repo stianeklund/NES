@@ -10,7 +10,7 @@ pub trait MemoryHandler {
     fn write(&mut self, addr: u16, byte: u8);
     fn write_word(&mut self, addr: u16, word: u16) {
         self.write(addr, (word as u8));
-        self.write(addr + 1, ((word << 8) as u8));
+        self.write(addr + 1, ((word >> 8) as u8));
     }
 }
 

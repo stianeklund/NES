@@ -4,6 +4,7 @@ use interconnect::MemoryHandler;
 use memory::{Ram, Mapper};
 use rom::Cartridge;
 
+
 impl MemoryHandler for ExecutionContext {
     fn read(&self, addr: u16) -> u8 {
         match addr {
@@ -81,7 +82,7 @@ impl Registers {
 
 
 pub struct Cpu {
-    reg: Registers,
+    pub reg: Registers,
     flags: StatusRegister,
     cycles: u16,
     opcode: u8,
@@ -90,10 +91,11 @@ pub struct Cpu {
 impl fmt::Debug for Cpu {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(f, "{}\t{}\t{}\t{}\t{}\t{}{} {} {} {} {} {}",
-                 "Opcode","PC","SP","A","X","Y\t", "N","D","I","Z","C","Cycles");
+                 "Opcode","PC","SP","A","X","Y\t", "N","D","I","Z","C","Cycles")?;
         writeln!(f, "{:04x}\t{:04x}\t{:04x}\t{:02x}\t{:04x}\t{:04x}\t{} {} {} {} {} {}",
                  self.opcode, self.reg.pc, self.reg.sp, self.reg.a, self.reg.x, self.reg.y,
-                 self.flags.negative, self.flags.decimal, self.flags.interrupt, self.flags.zero, self.flags.carry, self.cycles)
+                 self.flags.negative, self.flags.decimal, self.flags.interrupt, self.flags.zero, self.flags.carry, self.cycles)?;
+        Ok(())
     }
 }
 
@@ -150,8 +152,9 @@ impl ExecutionContext {
             },
             0x8000 ... 0xffff => {
                 println!("\n Indexed addr PRG:{:04x}, addr:{:04x}", self.cart.prg[addr as usize & 0x7fff], addr);
-                self.cart.prg[(((addr as u16) << 8) | (addr as u16)) as usize & 0x7fff]
                 // self.cart.prg[addr as usize & 0x7fff]
+                // Read word in prg rom
+                self.cart.prg[(((addr as u16) << 8) | (addr as u16)) as usize & 0x7fff]
             },
             _ => panic!("Unrecognized read address: {:04x}", addr)
         };
@@ -163,9 +166,13 @@ impl ExecutionContext {
 
     pub fn decode(&mut self) {
         // Instruction::decode(self.cart.prg[self.cpu.reg.pc as usize]);
-        let opcode = self.read(self.cpu.reg.pc);
-        // let opcode = self.cart.prg[self.cpu.reg.pc as usize];
-        println!("Opcode:{:04x}", opcode);
+        // let opcode = self.read(self.cpu.reg.pc);
+
+        // Read opcode from program memory
+        let opcode = self.cart.prg[self.cpu.reg.pc as usize];
+
+        // println!("PRG Contents:{:?}", self.cart.prg);
+
 
         match opcode {
             0x00 => self.brk(),
@@ -283,16 +290,28 @@ impl ExecutionContext {
         self.adv_cycles(6);
     }
 
+    fn push_stack(&mut self, value: u16) {
+        let sp = self.cpu.reg.sp;
+        self.write_word(0x100 + (sp.wrapping_sub(1)) as u16, value);
+        self.cpu.reg.sp = self.cpu.reg.sp.wrapping_sub(2);
+    }
+    // Jump to Subroutine
     fn jsr(&mut self) {
+        // Get value at word in PC & advance pc by 2
+        let addr = self.read_word(self.cpu.reg.pc);
         println!("JSR");
-        self.adv_cycles(3); // 6 if no jump?
         self.adv_pc(2);
+
+        // Push to stack
+        let pc = self.cpu.reg.pc;
+        self.push_stack(pc - 1);
+        self.adv_cycles(3); // 6 if no jump?
+        self.cpu.reg.pc = addr;
     }
     fn jmp(&mut self) {
         println!("JMP");
         let addr = self.cpu.reg.pc + 2;
         self.cpu.reg.pc = self.read_word(addr);
         self.adv_cycles(3);
-
     }
 }
