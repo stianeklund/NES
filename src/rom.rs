@@ -7,8 +7,8 @@ use std::io::Read;
 use std::fs::File;
 use std::io::{Result, Error};
 use std::str;
-use memory::{Ram, Mapper};
-use interconnect::{MemoryHandler, Interconnect};
+use memory::Ram;
+use interconnect::{MemoryMapper, Interconnect};
 use std::convert;
 
 /* ******************************************************************************************** */
@@ -73,12 +73,13 @@ impl IndexMut<u16> for Cartridge {
     }
 }
 
-impl MemoryHandler for Cartridge {
+impl MemoryMapper for Cartridge {
     fn read(&self, addr: u16) -> u8 {
         // let addr = self.mask_addr(addr);
         match addr {
             0 ... 0x07ff => panic!("Trying to read RAM from Cartridge"),
             0x0800 ... 0x1fff => panic!("Trying to read RAM Mirror from Cartridge"),
+            0x2000 ... 0x3fff => panic!("Trying to read from PPU registers. Not implemented"),
             0x8000 ... 0xffff => self.prg[addr as usize & 0x3fff],
             _ => panic!("Unrecognized read address: {:04x}", addr)
         }
@@ -91,6 +92,7 @@ impl MemoryHandler for Cartridge {
         match addr {
             0 ... 0x07ff => self.write(addr, byte),
             0x0800 ... 0x1fff => self.write(addr, byte),
+            0x2000 ... 0x3fff => self.write(addr, byte),
             0x8000 ... 0xffff => self.write(addr, byte),
             _ => eprintln!("Unable to write to memory address"),
         }
@@ -180,7 +182,6 @@ impl Cartridge {
         })
     }
 
-    // Validates parts of the iNES file format
     pub fn load_rom(&mut self, mut file: &File) {
 
         // The iNES header is 16 bytes long
@@ -189,18 +190,10 @@ impl Cartridge {
 
         let header = self.validate_header(&rom).unwrap();
         self.header = header;
-        // self.prg[16..rom.len()].clone_from_slice(&rom[16..]);
-        // .clone_from_slice(&rom[0x10..0x400F]);
-        let rom_len = rom.len();
+
         for i in 0..0x4000 {
             self.prg[i as usize] = rom[(0x10 + i) as usize];
         }
-    }
-
-    // Get contents of program counter at memory PRG ROM address
-    pub fn get_prg_pc(&self) -> u16 {
-        // TODO Offset here is wrong
-        (self.prg[(0xfffc as usize)] as u16) | (self.prg[(0xfffd as usize)] as u16) << 8 as u16
     }
 }
 

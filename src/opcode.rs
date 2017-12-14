@@ -6,7 +6,7 @@ pub struct Instruction {
     pub mnemonic: &'static str,
     pub bytes: u8,
     pub cycles: (u8, u8),
-    pub flags: [u8; 6],
+    pub flags: &'static str
 }
 
 
@@ -32,8 +32,8 @@ impl fmt::UpperHex for Register {
 }
 impl fmt::Debug for Instruction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:04x} {:02x} {:?} {:?} {:?}",
-        self.opcode, self.bytes, self.mnemonic, self.cycles, &self.flags[0..6])
+        write!(f, "{:04x} {:02x} {} {:?} {}",
+        self.opcode, self.bytes, self.mnemonic, self.cycles, self.flags)
     }
 }
 
@@ -44,10 +44,24 @@ impl Instruction {
             bytes: 0,
             mnemonic: "",
             cycles: (0,0),
-            flags: [0; 6],
+            flags: "",
         }
     }
 
+    // Returns the mnemonic of a instruction
+    pub fn mnemonic(opcode: u8) -> &'static str {
+        match opcode {
+            0x00 => "BRK",
+            0x01 => "ORA (a8, X)",
+            0x02 => "KIL",
+            0x03 => "SLO",
+            0x78 => "SEI",
+            _ => "Unknown opcode",
+        }
+
+
+
+    }
     pub fn decode(opcode: u8) -> Instruction {
         match opcode {
             0x00 => {
@@ -56,7 +70,7 @@ impl Instruction {
                     mnemonic: "BRK",
                     bytes: 2,
                     cycles: (7, 0),
-                    flags: [0,0,0,1,0,0],
+                    flags: "interrupt"
                 }
             },
             0x01 => {
@@ -65,7 +79,7 @@ impl Instruction {
                     mnemonic: "ORA (a8, X)",
                     bytes: 2,
                     cycles: (7, 0),
-                    flags: [0,0,0,1,0,0],
+                    flags: "negative, zero"
                 }
             },
             0x02 => {
@@ -74,7 +88,7 @@ impl Instruction {
                     mnemonic: "KIL",
                     bytes: 1,
                     cycles: (7, 0),
-                    flags: [0,0,0,0,0,0],
+                    flags: ""
                 }
             },
             0x03 => {
@@ -82,8 +96,17 @@ impl Instruction {
                     opcode,
                     mnemonic: "SLO",
                     bytes: 2,
-                    cycles: (7, 0),
-                    flags: [0,0,0,1,0,0],
+                    cycles: (8, 0),
+                    flags: "interrupt"
+                }
+            },
+            0x78 => {
+                Instruction {
+                    opcode,
+                    mnemonic: "SEI",
+                    bytes: 1,
+                    cycles: (2, 0),
+                    flags: "interrupt"
                 }
             }            _ => {
                 Instruction {
@@ -91,7 +114,7 @@ impl Instruction {
                     mnemonic: "Unknown",
                     bytes: 0,
                     cycles: (0, 0),
-                    flags: [0,0,0,0,0,0],
+                    flags: ""
                 }
             }
         }

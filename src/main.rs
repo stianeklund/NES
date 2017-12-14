@@ -6,11 +6,12 @@ mod interconnect;
 mod opcode;
 mod memory;
 mod cpu;
+mod ppu;
 
 use std::path::Path;
 use std::io::Read;
 use std::fs::File;
-use interconnect::{Interconnect, MemoryHandler};
+use interconnect::{Interconnect, MemoryMapper};
 use cpu::ExecutionContext;
 
 fn main() {
@@ -35,7 +36,7 @@ fn main() {
 
     // Get word at memory location 0xfffc and set PC value.
     ctx.cpu.reg.pc = ctx.read_word(0xfffc);
-    for _ in 0..10 {
+    loop {
         ctx.decode();
     }
 }

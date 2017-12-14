@@ -44,15 +44,3 @@ impl Ram {
     }
 }
 
-// TODO Implement remaining mappers
-// Memory Map https://wiki.nesdev.com/w/index.php/CPU_memory_map
-// We need a way to split up memory in chunks for easy access from different areas.
-// I.e PPU wants to access $2000 - 2007. All of this needs to be created in `Interconnect` however
-// it can be structured & setup here.
-pub trait Mapper {
-    fn read_byte(&mut self, addr: u16) -> u8;
-    fn write_byte(&mut self, addr: u16, byte: u8);
-    fn read_word(&mut self, addr: u16) -> u16;
-    fn write_word(&mut self, addr: u16, word: u16);
-}
-
