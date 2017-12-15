@@ -185,15 +185,24 @@ impl Cartridge {
     pub fn load_rom(&mut self, mut file: &File) {
 
         // The iNES header is 16 bytes long
-        let mut rom = vec![0u8; 2 * PRG_ROM_BANK_SIZE];
+        let mut rom = vec![0u8; 3 * PRG_ROM_BANK_SIZE];
         file.read(&mut rom).expect("Could not read rom file");
 
         let header = self.validate_header(&rom).unwrap();
         self.header = header;
 
-        for i in 0..0x4000 {
-            self.prg[i as usize] = rom[(0x10 + i) as usize];
+        let mut prg_lenght = 0;
+        // TODO Handle this better. We need to check the sizes here & allocate accordingly.
+
+        if self.header.prg_rom_size == 1 {
+            prg_lenght = 0x4000;
+        } else {
+            prg_lenght = 0x8000;
         }
+        for i in 0..prg_lenght {
+                self.prg[i as usize] = rom[(0x10 + i) as usize];
+        }
+
     }
 }
 

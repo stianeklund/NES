@@ -41,7 +41,12 @@ impl MemoryMapper for Interconnect {
             0 ... 0x07ff => self.ram.memory[addr as usize],
             0x0800 ... 0x1fff => self.ram.memory[addr as usize & 0x07ff],
             0x2000 ... 0x3fff => panic!("Trying to read from PPU registers. Not implemented"),
-            0x8000 ... 0xffff => self.cart.prg[addr as usize & 0x3fff],
+            0x8000 ... 0xffff => {
+                let mut prg_size = 0;
+                if self.cart.header.prg_rom_size == 1 { prg_size = 0x3fff; }
+                else { prg_size = 0x7fff; }
+                self.cart.prg[addr as usize & prg_size]
+            },
             _ => panic!("Unrecognized addr: {:04x}", addr)
         }
     }

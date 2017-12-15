@@ -14,7 +14,7 @@ impl MemoryMapper for ExecutionContext {
             // RAM Mirror
             0x0800...0x1fff => self.ram.memory[addr as usize & 0x07ff],
             0x2000 ... 0x3fff => self.ppu.vram[addr as usize & 0x2efff],
-            0x8000...0xffff => self.cart.prg[addr as usize & 0x3fff],
+            0x8000...0xffff => self.cart.prg[addr as usize & 0x7fff],
             _ => panic!("Unrecognized addr: {:04x}", addr)
         }
 
@@ -168,6 +168,7 @@ impl ExecutionContext {
             0x20 => self.jsr(),
             0x29 => self.and_d8(),
             0x2D => self.and_d16(),
+            0x4c => self.jmp(),
             0x5a => self.nop(),
             0x60 => self.rts(),
             0x61 => self.adc(),
@@ -455,7 +456,7 @@ impl ExecutionContext {
     }
     fn jmp(&mut self) {
         println!("JMP");
-        let addr = self.cpu.reg.pc + 2;
+        let addr = self.cpu.reg.pc + 1;
         self.cpu.reg.pc = self.read_word(addr);
         self.adv_cycles(3);
     }

@@ -34,9 +34,9 @@ fn main() {
     ctx.cart.load_rom(&mut f);
 
     // Get word at memory location 0xfffc and set PC value.
-    println!("Word at 0xfffc:{:04x}", ctx.read_word(0xfffc));
-    println!("NMI Vector: {:04x}", ctx.read_word(0xfffa));
-    println!("IRQ Vector: {:04x}", ctx.read_word(0xfffe));
+    println!("Reset Vector: {:04x}", ctx.read_word(0xfffc));
+    println!("NMI Vector:   {:04x}", ctx.read_word(0xfffa));
+    println!("IRQ Vector:   {:04x}", ctx.read_word(0xfffe));
     ctx.cpu.reg.pc = ctx.read_word(0xfffc);
     // ctx.cpu.reg.pc = 0xc000;
 
