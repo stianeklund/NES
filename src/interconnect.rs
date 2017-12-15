@@ -52,7 +52,7 @@ impl MemoryMapper for Interconnect {
             0...0x07ff => self.ram.memory[addr as usize] = byte,
             0x0800...0x1fff => self.ram.memory[addr as usize & 0x07ff] = byte,
             0x2000 ... 0x3fff => eprintln!("Writing to PPU registers is not implemented"),
-            0x8000...0xffff => self.cart.prg[addr as usize & 0x7fff] = byte,
+            0x8000...0xffff => self.cart.prg[addr as usize & 0x3fff] = byte,
             _ => eprintln!("Unable to write to memory address"),
         };
 

@@ -12,9 +12,9 @@ impl MemoryMapper for ExecutionContext {
             0...0x07ff => self.ram.memory[addr as usize] as u8,
             // 0...0x2007 => self.ppu[addr] // TODO
             // RAM Mirror
-            0x0800...0x1fff => self.ram.memory[addr as usize & 0x07ff] as u8,
-            0x2000 ... 0x3fff => self.ppu.vram[addr as usize & 0x2efff] as u8,
-            0x8000...0xffff => self.cart.prg[addr as usize & 0x3fff] as u8,
+            0x0800...0x1fff => self.ram.memory[addr as usize & 0x07ff],
+            0x2000 ... 0x3fff => self.ppu.vram[addr as usize & 0x2efff],
+            0x8000...0xffff => self.cart.prg[addr as usize & 0x3fff],
             _ => panic!("Unrecognized addr: {:04x}", addr)
         }
 
@@ -29,7 +29,7 @@ impl MemoryMapper for ExecutionContext {
             // but it can be partly or fully remapped to RAM on the cartridge,
             // allowing up to 4 simultaneous nametables.
             0x2000 ... 0x3fff => self.ppu.vram[addr as usize & 0x2efff] = byte,
-            0x8000...0xffff => self.cart.prg[addr as usize & 0x7fff] = byte,
+            0x8000...0xffff => self.cart.prg[addr as usize & 0x3fff] = byte,
             _ => eprintln!("Unable to write to memory address"),
         };
     }
@@ -94,7 +94,7 @@ impl Cpu {
         Cpu {
             reg: Registers {
                 pc: 0,
-                sp: 0xfd,
+                sp: 0, // 0xfd,
                 a: 0,
                 x: 0,
                 y: 0,
@@ -123,14 +123,18 @@ pub struct ExecutionContext {
     pub ppu: Ppu,
 }
 // TODO Implement Addressing modes for opcodes
+#[derive(Debug)]
 enum AddressMode {
-    ZeroPage,
-    ZeroPageX,
-    Absolute,
-    AbsoluteX,
-    AbsoluteY,
-    IndirectX,
-    IndirectY,
+    ZeroPage,  // Zero Page addressing, $00nn
+    ZeroPageX, // $00nn + X
+    ZeroPageY, // $00nn + y
+    Immediate, // Immediate addressing; immediately following the opcode.
+    Absolute,  // Absolute addressing. Fetches the next two memory slots & combines them into a word.
+    AbsoluteX, // X indexed. Fetches the next two memory slots & combines them into a word, then adds X.
+    AbsoluteY, // Y indexed. Fetches the next two memory slots & combines them into a word, then adds Y.
+    Indirect,  // Indirect addressing; special for JMP
+    IndirectX, // X indexed addressing.
+    IndirectY, // Y indexed addressing.
 }
 
 impl ExecutionContext {
@@ -181,6 +185,7 @@ impl ExecutionContext {
             0xd8 => self.cld(),
             0xdf => self.dcp(),
             0xf0 => self.beq(),
+            0xff => self.isc(AddressMode::AbsoluteX),
             _ => eprintln!("Not implemented"),
         }
         self.cpu.opcode = opcode as u8;
@@ -237,9 +242,7 @@ impl ExecutionContext {
         self.cpu.flags.negative = self.cpu.reg.a & 0x80 != 0;
         self.cpu.flags.zero = self.cpu.reg.a & 0xff == 0;
     }
-    fn nop(&mut self) {
-        self.adv_pc(1);
-    }
+
     // Branch on Equal
     fn beq(&mut self) {
         println!("BEQ");
@@ -252,6 +255,14 @@ impl ExecutionContext {
         self.adv_cycles(2);
         self.adv_pc(1);
     }
+    // Branch on Plus
+    fn bpl(&mut self) {
+        println!("BPL");
+        // Cycles 3+ / 2
+        self.adv_pc(2);
+        self.adv_cycles(3);
+    }
+
     fn brk(&mut self) {
         println!("BRK");
         self.cpu.flags.brk = true;
@@ -316,15 +327,14 @@ impl ExecutionContext {
         self.cpu.flags.negative = d8 & 0x80 != 0;
         self.adv_pc(1);
         self.adv_cycles(3)
-
     }
     // LDA (A8, X)
-    fn lda(&mut self, mode: AddressMode,) {
+    fn lda(&mut self, mode: AddressMode, ) {
         println!("LDA (A8, X)");
         // Immediate?
         let mut data: u16 = 0;
         match mode {
-            AddressMode::Absolute =>  {
+            AddressMode::Absolute => {
                 data = self.read_word(self.cpu.reg.pc + 2);
                 self.adv_cycles(4);
             },
@@ -335,7 +345,6 @@ impl ExecutionContext {
                 self.cpu.reg.a = data as u8;
             },
             _ => eprintln!("Not included"),
-
         }
         // let a8 = self.read(self.cpu.reg.pc + 1);
         // self.cpu.reg.x = a8;
@@ -354,7 +363,6 @@ impl ExecutionContext {
         self.cpu.flags.negative = a8 & 0x80 != 0;
         self.adv_cycles(4);
         self.adv_pc(2);
-
     }
     // LDY Load Y Register (d8)
     fn ldy(&mut self) {
@@ -366,13 +374,12 @@ impl ExecutionContext {
         self.cpu.flags.negative = d8 & 0x80 != 0;
         self.adv_cycles(2);
         self.adv_pc(1);
-
     }
     // Load X Register
     fn ldax(&mut self) {
         println!("LDX D8");
         let d8 = self.read(self.cpu.reg.pc + 1);
-       self.cpu.reg.x = d8;
+        self.cpu.reg.x = d8;
         self.cpu.flags.zero = d8 & 0xff == 0;
         self.cpu.flags.negative = d8 & 0x80 != 0;
         self.adv_pc(1);
@@ -390,14 +397,10 @@ impl ExecutionContext {
         self.adv_pc(2);
         self.adv_cycles(6);
     }
-
-    // Branch on Plus
-    fn bpl(&mut self) {
-        println!("BPL");
-        // Cycles 3+ / 2
-        self.adv_pc(2);
-        self.adv_cycles(3);
+    fn nop(&mut self) {
+        self.adv_pc(1);
     }
+
     fn rol(&mut self) {
         println!("ROL");
         self.adv_pc(1);
@@ -460,5 +463,25 @@ impl ExecutionContext {
         println!("SEI");
         self.cpu.flags.interrupt = true;
         self.adv_cycles(2);
+    }
+    // ISC (Increase memory by one)
+    fn isc(&mut self, mode: AddressMode) {
+        println!("ISC {:?}", mode);
+        match mode {
+            AddressMode::AbsoluteX => {
+                let value = self.cpu.reg.pc.wrapping_add(1);
+                let addr = self.read_word(value);
+                println!("Value:{:04x}, Word:{:04x}", value, addr);
+                let result = (self.cpu.reg.a as u16).wrapping_sub(addr as u16).wrapping_sub(self.cpu.flags.carry as u16);
+                self.cpu.flags.zero = result & 0xff == 0;
+                self.cpu.flags.negative = result & 0x80 != 0;
+                // self.cpu.reg.a -= addr;
+                self.cpu.reg.a = result as u8;
+
+                self.adv_pc(2);
+                self.adv_cycles(5);
+            }
+            _ => eprintln!("Unknown address mode"),
+        }
     }
 }
