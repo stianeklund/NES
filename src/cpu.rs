@@ -168,9 +168,9 @@ impl ExecutionContext {
             0x01 => self.bpl(),
             0x04 => self.rti(),
             0x06 => self.asl(),
-            0xa0 => self.ldy(),
+            0xa0 => self.ldy(AddressMode::Immediate),
             0xa1 => self.lda(AddressMode::IndirectX),
-            0xa2 => self.lda(AddressMode::AbsoluteX),
+            0xa2 => self.ldx(AddressMode::Immediate),
             0xa5 => self.lda(AddressMode::ZeroPage),
             0xad => self.lda(AddressMode::Absolute),
             0xa9 => self.lda(AddressMode::Immediate),
@@ -363,17 +363,94 @@ impl ExecutionContext {
         self.adv_pc(2);
         self.adv_cycles(7);
     }
-    // LDA A8
-    fn lda_a8(&mut self) {
-        println!("LDA A8");
-        let d8 = self.read(self.cpu.reg.pc + 1);
-        self.cpu.reg.a = d8 as u8;
-        self.cpu.flags.zero = (d8 & 0xff) == 0;
-        self.cpu.flags.negative = (d8 & 0x80) != 0;
-        self.adv_pc(2);
-        self.adv_cycles(2)
+    // Generic LOAD function
+    fn ld(&mut self, mode: AddressMode, mut reg: &str) {
+        // TODO Handle page boundry crossing
+        // + 1 cycle if page boundry is crossed
+        match reg {
+            a => self.cpu.reg.a,
+            x => self.cpu.reg.x,
+            y => self.cpu.reg.y,
+        }
+        match mode {
+            AddressMode::Absolute => {
+                // LDA A16
+                println!("LDA {:?}", mode);
+                let data = self.read_word(self.cpu.reg.pc + 1);
+                reg = data as u8;
+                self.cpu.flags.zero = (data & 0xff) == 0;
+                self.cpu.flags.negative = (data & 0x80) != 0;
+                self.adv_cycles(4);
+                self.adv_pc(3);
+            },
+            AddressMode::AbsoluteX => {
+                println!("LDA {:?}", mode);
+                let data = self.read_word(self.cpu.reg.pc + 1) + self.cpu.reg.x as u16;
+
+                reg = data as u8;
+                self.cpu.flags.zero = (data & 0xff) == 0;
+                self.cpu.flags.negative = (data & 0x80) != 0;
+                self.adv_cycles(6);
+                self.adv_pc(2);
+            },
+            AddressMode::AbsoluteY => {
+                println!("LDA {:?}", mode);
+                let data = self.read_word(self.cpu.reg.pc + 1) + self.cpu.reg.y as u16;
+                self.cpu.flags.zero = (data & 0xff) == 0;
+                self.cpu.flags.negative = (data & 0x80) != 0;
+                reg = data as u8;
+                self.adv_cycles(4);
+                self.adv_pc(3);
+            }
+            AddressMode::IndirectX => {
+                unimplemented!();
+                println!("LDA {:?} not fully implemented", mode);
+                let data = self.read_word(self.cpu.reg.pc + 1);
+                // TODO Cycles is 5 if page boundry is crossed
+                reg = data as u8;
+                self.cpu.flags.zero = (data & 0xff) == 0;
+                self.cpu.flags.negative = (data & 0x80) != 0;
+                self.adv_cycles(2);
+                self.adv_pc(2);
+            }
+            AddressMode::IndirectY => {
+                unimplemented!();
+                println!("LDA {:?} not fully implemented", mode);
+                let data = self.read_word(self.cpu.reg.pc + 1);
+                self.cpu.flags.zero = (data & 0xff) == 0;
+                self.cpu.flags.negative = (data & 0x80) != 0;
+                // TODO Cycles is 5 if page boundry is crossed
+                self.adv_cycles(2);
+                self.adv_pc(2);
+                reg = data as u8;
+            }
+            AddressMode::Immediate => {
+                // LDA #d8
+                println!("LD {} {:?}", reg, mode);
+                let d8 = self.read(self.cpu.reg.pc + 1);
+                reg = d8 as u8;
+                self.cpu.flags.zero = (d8 & 0xff) == 0;
+                self.cpu.flags.negative = (d8 & 0x80) != 0;
+                self.adv_pc(2);
+                self.adv_cycles(2);
+            }
+            AddressMode::ZeroPage => {
+                println!("LDA {:?}", mode);
+                let d8 = self.read_word(self.cpu.reg.pc + 1) & 0xff;
+                self.cpu.reg.a = d8 as u8;
+                self.cpu.flags.zero = (d8 & 0xff) == 0;
+                self.cpu.flags.negative = (d8 & 0x80) != 0;
+                self.adv_pc(2);
+                self.adv_cycles(2);
+            }
+            AddressMode::ZeroPageX => unimplemented!(),
+            AddressMode::ZeroPageY => unimplemented!(),
+
+            _ => eprintln!("Not included"),
+        }
+
     }
-    fn lda(&mut self, mode: AddressMode, ) {
+    fn ldy(&mut self, mode: AddressMode, ) {
         // TODO Handle page boundry crossing
         // + 1 cycle if page boundry is crossed
         match mode {
@@ -453,17 +530,6 @@ impl ExecutionContext {
             _ => eprintln!("Not included"),
         }
 
-    }
-    // LDY Load Y Register (d8)
-    fn ldy(&mut self) {
-        // TODO Bitmasks
-        println!("LDY D8");
-        let d8 = self.read(self.cpu.reg.pc + 1);
-        self.cpu.reg.y = d8;
-        self.cpu.flags.zero = (d8 & 0xff) == 0;
-        self.cpu.flags.negative = (d8 & 0x80) != 0;
-        self.adv_cycles(2);
-        self.adv_pc(2);
     }
     // Logical Shift Right
     fn lsr(&mut self) {
