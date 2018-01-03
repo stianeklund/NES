@@ -148,6 +148,13 @@ enum AddressMode {
     IndirectY, // Y indexed addressing.
 }
 
+#[derive(Debug)]
+enum Reg {
+    A,
+    X,
+    Y,
+}
+
 impl ExecutionContext {
     pub fn new() -> ExecutionContext {
         ExecutionContext {
@@ -169,16 +176,16 @@ impl ExecutionContext {
             0x04 => self.rti(),
             0x06 => self.asl(),
             0xa0 => self.ldy(AddressMode::Immediate),
-            0xa1 => self.lda(AddressMode::IndirectX),
-            0xa2 => self.ldx(AddressMode::Immediate),
-            0xa5 => self.lda(AddressMode::ZeroPage),
-            0xad => self.lda(AddressMode::Absolute),
-            0xa9 => self.lda(AddressMode::Immediate),
-            0xb1 => self.lda(AddressMode::IndirectY),
-            0xb5 => self.lda(AddressMode::ZeroPageX),
+            0xa1 => self.ld(Reg::A, AddressMode::IndirectX),
+            0xa2 => self.ld(Reg::A, AddressMode::Immediate),
+            0xa5 => self.ld(Reg::A, AddressMode::ZeroPage),
+            0xad => self.ld(Reg::A, AddressMode::Absolute),
+            0xa9 => self.ld(Reg::A, AddressMode::Immediate),
+            0xb1 => self.ld(Reg::A, AddressMode::IndirectY),
+            0xb5 => self.ld(Reg::A, AddressMode::ZeroPageX),
             0xb8 => self.clv(),
-            0xb9 => self.lda(AddressMode::AbsoluteY),
-            0xbd => self.lda(AddressMode::AbsoluteX),
+            0xb9 => self.ld(Reg::A, AddressMode::AbsoluteY),
+            0xbd => self.ld(Reg::A, AddressMode::AbsoluteX),
             0x40 => self.rti(),
             0x4e => self.lsr(),
             0x48 => self.pha(),
@@ -364,20 +371,20 @@ impl ExecutionContext {
         self.adv_cycles(7);
     }
     // Generic LOAD function
-    fn ld(&mut self, mode: AddressMode, mut reg: &str) {
+    fn ld(&mut self, reg: Reg, mode: AddressMode) {
         // TODO Handle page boundry crossing
         // + 1 cycle if page boundry is crossed
-        match reg {
-            a => self.cpu.reg.a,
-            x => self.cpu.reg.x,
-            y => self.cpu.reg.y,
-        }
+        let mut register: u8 = match reg {
+            Reg::A => self.cpu.reg.a,
+            Reg::X => self.cpu.reg.x,
+            Reg::Y => self.cpu.reg.y,
+        };
         match mode {
             AddressMode::Absolute => {
                 // LDA A16
                 println!("LDA {:?}", mode);
                 let data = self.read_word(self.cpu.reg.pc + 1);
-                reg = data as u8;
+                register = data as u8;
                 self.cpu.flags.zero = (data & 0xff) == 0;
                 self.cpu.flags.negative = (data & 0x80) != 0;
                 self.adv_cycles(4);
@@ -387,7 +394,7 @@ impl ExecutionContext {
                 println!("LDA {:?}", mode);
                 let data = self.read_word(self.cpu.reg.pc + 1) + self.cpu.reg.x as u16;
 
-                reg = data as u8;
+                register = data as u8;
                 self.cpu.flags.zero = (data & 0xff) == 0;
                 self.cpu.flags.negative = (data & 0x80) != 0;
                 self.adv_cycles(6);
@@ -398,7 +405,7 @@ impl ExecutionContext {
                 let data = self.read_word(self.cpu.reg.pc + 1) + self.cpu.reg.y as u16;
                 self.cpu.flags.zero = (data & 0xff) == 0;
                 self.cpu.flags.negative = (data & 0x80) != 0;
-                reg = data as u8;
+                register = data as u8;
                 self.adv_cycles(4);
                 self.adv_pc(3);
             }
@@ -407,7 +414,7 @@ impl ExecutionContext {
                 println!("LDA {:?} not fully implemented", mode);
                 let data = self.read_word(self.cpu.reg.pc + 1);
                 // TODO Cycles is 5 if page boundry is crossed
-                reg = data as u8;
+                register = data as u8;
                 self.cpu.flags.zero = (data & 0xff) == 0;
                 self.cpu.flags.negative = (data & 0x80) != 0;
                 self.adv_cycles(2);
@@ -422,13 +429,13 @@ impl ExecutionContext {
                 // TODO Cycles is 5 if page boundry is crossed
                 self.adv_cycles(2);
                 self.adv_pc(2);
-                reg = data as u8;
+                register = data as u8;
             }
             AddressMode::Immediate => {
                 // LDA #d8
-                println!("LD {} {:?}", reg, mode);
+                println!("LD {:?} {:?}", reg, mode);
                 let d8 = self.read(self.cpu.reg.pc + 1);
-                reg = d8 as u8;
+                register = d8 as u8;
                 self.cpu.flags.zero = (d8 & 0xff) == 0;
                 self.cpu.flags.negative = (d8 & 0x80) != 0;
                 self.adv_pc(2);
