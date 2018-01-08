@@ -1,4 +1,6 @@
 #![feature(ascii_ctype)]
+#![feature(nll)]
+
 extern crate minifb;
 
 mod rom;
@@ -38,7 +40,6 @@ fn main() {
     println!("NMI Vector:   {:04x}", ctx.read_word(0xfffa));
     println!("IRQ Vector:   {:04x}", ctx.read_word(0xfffe));
     ctx.cpu.reg.pc = ctx.read_word(0xfffc);
-    // ctx.cpu.reg.pc = 0xc000;
 
     // Step one instruction at a time
     loop {
