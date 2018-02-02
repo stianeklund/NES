@@ -5,7 +5,7 @@ use ppu::Ppu;
 
 pub trait MemoryMapper {
     fn read(&self, addr: u16) -> u8 ;
-    fn read_word(&self, addr: u16) -> u16{
+    fn read_word(&self, addr: u16) -> u16 {
         (self.read(addr) as u16) | (self.read(addr + 1) as u16) << 8
     }
     fn write(&mut self, addr: u16, byte: u8);
