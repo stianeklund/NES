@@ -220,12 +220,12 @@ impl ExecutionContext {
         }
         self.cpu.opcode = opcode as u8;
         self.cpu.reg.prev_pc = self.cpu.reg.pc;
-        // println!("Decoded instruction: {:?}", Instruction::decode(opcode));
 
+        println!("{}", Instruction::mnemonic(opcode));
+        // Debug print CPU values
         println!("{:?}", self.cpu);
     }
     fn adc(&mut self) {
-        println!("ADC");
         self.adv_pc(2);
         let mem_value = self.ram.memory[self.cpu.reg.pc as usize];
         let result = (self.cpu.reg.a as u16).wrapping_add(mem_value as u16).wrapping_add(self.cpu.flags.carry as u16);
@@ -235,7 +235,6 @@ impl ExecutionContext {
     }
     // Arithmetic shift left zero page
     fn asl(&mut self) {
-        println!("ASL");
         let carry = (self.cpu.reg.a & 1) != 0;
         let value = self.ram.memory[self.cpu.reg.pc as usize];
         // Check if 7th bit has been set
@@ -252,7 +251,6 @@ impl ExecutionContext {
     }
     // TODO Use addressing modes
     fn and_d16(&mut self) {
-        println!("AND D16");
         let d16 = self.read_word(self.cpu.reg.pc + 1);
         self.cpu.reg.a = ((self.cpu.reg.a as u16) & d16) as u8;
         self.adv_pc(2);
@@ -263,7 +261,6 @@ impl ExecutionContext {
     }
     // AND with immediate data
     fn and_d8(&mut self) {
-        println!("AND D8");
         let d8 = self.read(self.cpu.reg.pc + 1);
         self.cpu.reg.a &= d8;
         self.adv_pc(2);
@@ -275,7 +272,6 @@ impl ExecutionContext {
 
     // Branch on Equal
     fn beq(&mut self) {
-        println!("BEQ");
         if self.read(self.cpu.reg.pc + 1) == 0xf9 {
             if self.cpu.flags.zero {
                 self.cpu.reg.pc -= 7;
@@ -287,14 +283,12 @@ impl ExecutionContext {
     }
     // Branch on Plus
     fn bpl(&mut self) {
-        println!("BPL");
         // Cycles 3+ / 2
         self.adv_pc(3);
         self.adv_cycles(3);
     }
 
     fn brk(&mut self) {
-        println!("BRK");
         self.cpu.flags.brk = true;
         let pc = self.cpu.reg.pc;
         self.push_word(pc + 1);
@@ -304,7 +298,6 @@ impl ExecutionContext {
     }
     // Test Bits N Z V
     fn bit(&mut self, mode: AddressMode) {
-        println!("BIT");
         match mode {
             AddressMode::ZeroPage => {
                 // BIT $44 HEX: $24, LEN: 2, TIME: 3
@@ -320,7 +313,6 @@ impl ExecutionContext {
         }
     }
     fn bne(&mut self) {
-        println!("BNE");
         if !self.cpu.flags.zero {
             self.adv_pc(3);
             self.adv_cycles(3);
@@ -330,7 +322,6 @@ impl ExecutionContext {
     }
     // Branch on overflow set
     fn bvs(&mut self) {
-        println!("BVS");
         if self.cpu.flags.overflow {
             self.adv_pc(2);
             self.adv_cycles(3);
@@ -341,14 +332,12 @@ impl ExecutionContext {
     }
     // Clear decimal
     fn cld(&mut self) {
-        println!("CLD");
         self.cpu.flags.decimal = false;
         self.adv_pc(1);
         self.adv_cycles(2);
     }
     // Clear overflow
     fn clv(&mut self) {
-        println!("CLV");
         self.cpu.flags.overflow = false;
         self.adv_pc(1);
         self.adv_cycles(2);
@@ -363,12 +352,11 @@ impl ExecutionContext {
     }
     // Generic LOAD function
     fn ld(&mut self, mut reg: u8, mode: AddressMode) {
-        // TODO Handle page boundry crossing
-        // + 1 cycle if page boundry is crossed
+        // TODO Handle page boundary crossing
+        // + 1 cycle if page boundary is crossed
         match mode {
             AddressMode::Absolute => {
                 // LDA A16
-                println!("LDA {:?}", mode);
                 let data = self.read_word(self.cpu.reg.pc + 1);
                 reg = data as u8;
                 self.cpu.flags.zero = (data & 0xff) == 0;
@@ -377,7 +365,6 @@ impl ExecutionContext {
                 self.adv_pc(3);
             },
             AddressMode::AbsoluteX => {
-                println!("LDA {:?}", mode);
                 let data = self.read_word(self.cpu.reg.pc + 1) + self.cpu.reg.x as u16;
                 reg = data as u8;
                 self.cpu.flags.zero = (data & 0xff) == 0;
@@ -386,7 +373,6 @@ impl ExecutionContext {
                 self.adv_pc(2);
             },
             AddressMode::AbsoluteY => {
-                println!("LDA {:?}", mode);
                 let data = self.read_word(self.cpu.reg.pc + 1) + self.cpu.reg.y as u16;
                 self.cpu.flags.zero = (data & 0xff) == 0;
                 self.cpu.flags.negative = (data & 0x80) != 0;
@@ -396,7 +382,6 @@ impl ExecutionContext {
             }
             AddressMode::IndirectX => {
                 unimplemented!();
-                println!("LDA {:?} not fully implemented", mode);
                 let data = self.read_word(self.cpu.reg.pc + 1);
                 // TODO Cycles is 5 if page boundry is crossed
                 reg = data as u8;
@@ -407,7 +392,6 @@ impl ExecutionContext {
             }
             AddressMode::IndirectY => {
                 unimplemented!();
-                println!("LDA {:?} not fully implemented", mode);
                 let data = self.read_word(self.cpu.reg.pc + 1);
                 self.cpu.flags.zero = (data & 0xff) == 0;
                 self.cpu.flags.negative = (data & 0x80) != 0;
@@ -418,7 +402,6 @@ impl ExecutionContext {
             }
             AddressMode::Immediate => {
                 // LDA #d8
-                println!("LD {:?} {:?}", reg, mode);
                 let d8 = self.read(self.cpu.reg.pc + 1);
                 reg = d8 as u8;
                 self.cpu.flags.zero = (d8 & 0xff) == 0;
@@ -427,7 +410,6 @@ impl ExecutionContext {
                 self.adv_cycles(2);
             }
             AddressMode::ZeroPage => {
-                println!("LDA {:?}", mode);
                 let d8 = self.read_word(self.cpu.reg.pc + 1) & 0xff;
                 self.cpu.reg.a = d8 as u8;
                 self.cpu.flags.zero = (d8 & 0xff) == 0;
@@ -444,7 +426,6 @@ impl ExecutionContext {
     }
     // Logical Shift Right
     fn lsr(&mut self) {
-        println!("LSR");
         // Flags affected
         let carry = (self.cpu.reg.a & 1) != 0;
         self.cpu.reg.a = (self.cpu.reg.a >> 1) | ((self.cpu.flags.carry as u8) << 7);
@@ -460,12 +441,10 @@ impl ExecutionContext {
     }
 
     fn rol(&mut self) {
-        println!("ROL");
         self.adv_pc(2);
         self.adv_cycles(5);
     }
     fn rts(&mut self) {
-        println!("RTS");
         let low = self.read(self.cpu.reg.sp as u16);
         let high = self.read(self.cpu.reg.sp.wrapping_add(1) as u16);
         let mut ret: u16 = (high as u16) << 8 | (low as u16);
@@ -480,7 +459,6 @@ impl ExecutionContext {
         self.adv_cycles(6);
     }
     fn rti(&mut self) {
-        println!("RTI");
         // Return from interrupt
         // TODO store flags & pop pc
         self.adv_pc(1);
@@ -491,7 +469,6 @@ impl ExecutionContext {
         match mode {
             AddressMode::Absolute => {
                 // Opcode $8d
-                println!("STA ABS");
                 let addr = self.read_word(self.cpu.reg.pc + 1);
                 // Write value of accumulator to memory address
                 self.write(addr, reg);
@@ -499,14 +476,12 @@ impl ExecutionContext {
                 self.adv_pc(3);
             },
             AddressMode::AbsoluteX => {
-                println!("STA ABX");
                 let addr = self.read_word(self.cpu.reg.pc + 1);
                 self.write(addr, reg);
                 self.adv_cycles(4);
                 self.adv_pc(3);
             },
             AddressMode::IndirectY => {
-                println!("STA Indirect Y");
                 let value = self.cpu.reg.pc + 1;
                 let addr = self.read_word(value) + reg as u16;
                 self.write(addr, reg);
@@ -514,7 +489,6 @@ impl ExecutionContext {
                 self.adv_pc(2);
             },
             AddressMode::ZeroPage=> {
-                println!("STA Zero Page");
                 // Mask the upper two bytes
                 let addr = self.read_word(self.cpu.reg.pc + 1) & 0xff;
                 // Write value of accumulator to memory address
@@ -530,7 +504,6 @@ impl ExecutionContext {
         match mode {
 
             AddressMode::Absolute => {
-                println!("STY ABS");
                 let addr = self.read_word(self.cpu.reg.pc + 1);
                 let y = self.cpu.reg.y;
                 self.write(addr, y);
@@ -538,7 +511,6 @@ impl ExecutionContext {
                 self.adv_cycles(3);
             },
             AddressMode::ZeroPage=> {
-                println!("STY ZeroPage");
                 let addr = self.read_word(self.cpu.reg.pc + 1);
                 let y = self.cpu.reg.y;
                 // Write value of accumulator to memory address
@@ -553,7 +525,6 @@ impl ExecutionContext {
         // Ex: Absolute: STA $4400 Hex: $8D Len: 3 Cycles:4
         match mode {
             AddressMode::Absolute => {
-                println!("STX ABS");
                 let addr = self.read_word(self.cpu.reg.pc + 1);
                 let x = self.cpu.reg.x;
                 // Write value of accumulator to memory address
@@ -562,7 +533,6 @@ impl ExecutionContext {
                 self.adv_pc(3);
             }
             AddressMode::ZeroPage => {
-                println!("STX ZeroPage");
                 let addr = self.read_word(self.cpu.reg.pc + 1) & 0xff;
                 let x = self.cpu.reg.x;
                 // Write value of accumulator to memory address
@@ -576,7 +546,6 @@ impl ExecutionContext {
 
     // Transfer X to Stack Pointer
     fn txs(&mut self) {
-        println!("TXS");
         // TODO TXS is like POP?
         let x = self.cpu.reg.x;
         self.push_byte(x);
@@ -597,7 +566,6 @@ impl ExecutionContext {
     }
     // Push accumulator
     fn pha(&mut self) {
-        println!("PHA");
         let a = self.cpu.reg.a;
         self.push_byte(a);
         self.adv_pc(1);
@@ -605,7 +573,6 @@ impl ExecutionContext {
     }
     // Increment Memory
     fn inc(&mut self, mode: AddressMode) {
-        println!("INC");
         match mode {
             AddressMode::ZeroPage => {
                 let value = self.read(self.cpu.reg.pc + 1) as u16;
@@ -621,7 +588,6 @@ impl ExecutionContext {
     }
     // Increment X (implied mode)
     fn inx(&mut self) {
-        println!("INX");
         self.cpu.reg.x = self.cpu.reg.x.wrapping_add(1);
         self.adv_cycles(2);
         self.cpu.flags.zero = (self.cpu.reg.x & 0xff) == 0;
@@ -630,7 +596,6 @@ impl ExecutionContext {
 
     }
     fn iny(&mut self) {
-        println!("INY");
         self.cpu.reg.y = self.cpu.reg.y.wrapping_add(1);
         self.adv_cycles(2);
         self.cpu.flags.zero = (self.cpu.reg.y & 0xff) == 0;
@@ -641,7 +606,6 @@ impl ExecutionContext {
     // Jump to Subroutine
     fn jsr(&mut self) {
         let addr = self.read_word(self.cpu.reg.pc + 1);
-        println!("JSR");
         self.adv_pc(3);
 
         // Push to stack
@@ -651,7 +615,6 @@ impl ExecutionContext {
         self.cpu.reg.pc = addr;
     }
     fn jmp(&mut self) {
-        println!("JMP");
         let pc = self.cpu.reg.pc + 1;
         let addr = self.read_word(pc);
         println!("Destination: {:04x}", addr);
@@ -659,14 +622,12 @@ impl ExecutionContext {
         self.adv_cycles(3);
     }
     fn sei(&mut self) {
-        println!("SEI");
         self.cpu.flags.interrupt = true;
         self.adv_pc(1);
         self.adv_cycles(2);
     }
     // ISC (Increase memory by one)
     fn isc(&mut self, mode: AddressMode) {
-        println!("ISC {:?}", mode);
         match mode {
             AddressMode::AbsoluteX => {
                 let value = self.cpu.reg.pc.wrapping_add(1);
