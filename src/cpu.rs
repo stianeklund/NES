@@ -133,19 +133,19 @@ pub struct ExecutionContext {
     pub ram: Ram,
     pub ppu: Ppu,
 }
-// TODO Implement Addressing modes for opcodes
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 enum AddressMode {
-    ZeroPage,  // Zero Page addressing, $00nn
-    ZeroPageX, // $00nn + X
-    ZeroPageY, // $00nn + y
-    Immediate, // Immediate addressing; immediately following the opcode.
-    Absolute,  // Absolute addressing. Fetches the next two memory slots & combines them into a word.
-    AbsoluteX, // X indexed. Fetches the next two memory slots & combines them into a word, then adds X.
-    AbsoluteY, // Y indexed. Fetches the next two memory slots & combines them into a word, then adds Y.
-    Indirect,  // Indirect addressing; special for JMP
-    IndirectX, // X indexed addressing.
-    IndirectY, // Y indexed addressing.
+    Accumulator, // Not really an addressing mode but used here for convenience to access it easily
+    ZeroPage,    // Zero Page addressing, $00nn
+    ZeroPageX,   // $00nn + X
+    ZeroPageY,   // $00nn + y
+    Immediate,   // Immediate addressing; immediately following the opcode.
+    Absolute,    // Absolute addressing. Fetches the next 2 mem slots & combines them into a word.
+    AbsoluteX,   // X indexed. Fetches the next 2 mem slots & combines them into a word, then adds X.
+    AbsoluteY,   // Y indexed. Fetches the next 2 mem slots & combines them into a word, then adds Y.
+    Indirect,    // Indirect addressing; special for JMP (Not really implemented or needed?)
+    IndirectX,   // X indexed addressing.
+    IndirectY,   // Y indexed addressing.
 }
 
 impl ExecutionContext {
@@ -182,7 +182,7 @@ impl ExecutionContext {
             0x40 => self.rti(),
             0x4e => self.lsr(),
             0x48 => self.pha(),
-            0x2a => self.rol(AddressMode::Immediate),
+            0x2a => self.rol(AddressMode::Accumulator),
             0x2e => self.rol(AddressMode::Absolute),
             0x20 => self.jsr(),
             0x24 => self.bit(AddressMode::ZeroPage),
@@ -365,6 +365,7 @@ impl ExecutionContext {
     fn dec(&mut self, mode: AddressMode) {
         // TODO
         match mode {
+            AddressMode:: Accumulator => {},
             AddressMode::ZeroPage => {},
             AddressMode::ZeroPageX => {},
             AddressMode::ZeroPageY => {},
@@ -598,43 +599,49 @@ impl ExecutionContext {
 
     // Rotate one bit right (memory)
     fn rol(&mut self, mode: AddressMode) {
-        /* if self.cpu.opcode == 0x2a {
-            // Accumulator
-            if self.cpu.flags.carry {
-                src | 0x1;
-        }*/
-        // unimplemented!();
-        let mut src;
-        match mode {
-            AddressMode::ZeroPage => { src = self.read_word(self.cpu.reg.pc + 1) & 0xff; },
-            AddressMode::ZeroPageX => {
-                src = self.read_word(self.cpu.reg.pc +1) & 0xff + self.cpu.reg.x as u16;
-            },
-            AddressMode::ZeroPageY => {
-                src = self.read_word(self.cpu.reg.pc +1) & 0xff + self.cpu.reg.y as u16;
-            },
-            AddressMode::Immediate => { self.read(self.cpu.reg.pc + 1); },
-            AddressMode::Absolute => { src = self.read_word(self.cpu.reg.pc + 1); },
-            AddressMode::AbsoluteX => {
-                src = self.read_word(self.cpu.reg.pc + 1) + self.cpu.reg.x as u16;
-            },
-            AddressMode::AbsoluteY => {
-                src = self.read_word(self.cpu.reg.pc + 1) + self.cpu.reg.y as u16;
-            },
-            AddressMode::Indirect => { unimplemented!() },
-            AddressMode::IndirectX => { unimplemented!() },
-            AddressMode::IndirectY => { unimplemented!() },
-            _ => eprintln!("Unknown addressing mode: {:?}", mode),
+
+        let mut pc = self.cpu.reg.pc;
+
+        // TODO Refactor this & investigate whether the Absolute Addressing modes are impl correctly
+
+        let mut src: u16 = match mode {
+            AddressMode::Accumulator => { self.cpu.reg.a as u16 }
+            AddressMode::ZeroPage => { self.read_word(pc + 1) & 0xff as u16 }
+            AddressMode::ZeroPageX => { self.read_word(pc +1) & 0xff + self.cpu.reg.x as u16 }
+            AddressMode::Absolute => { self.read_word(pc + 1) as u16 }
+            AddressMode::AbsoluteX => { self.read_word(pc + 1) + self.cpu.reg.x as u16 }
+            AddressMode::AbsoluteY => { self.read_word(pc + 1) + self.cpu.reg.y as u16 }
+            _ => { unreachable!("Address mode {:?} should not be called on ROL", mode) }
         };
-        // self.write(addr, self.cpu.reg.a);
-        // self.cpu.flags.zero = (data & 0xff) == 0;
-        // self.cpu.flags.negative = (data & 0x80) != 0;
+        // Original bit is shifted into carry slot & carry is shifted into bit 7.
+        let result = src << 1 & 0xfe;
+
+        // The program counter is already modified by this point by the above `match`.
+        let addr = self.cpu.reg.pc;
+
+        // Write result to address
+        println!("Writing :{:04x} to address:{:04x}", result, addr);
+        if mode != AddressMode::Accumulator {
+            self.write(addr, result as u8);
+        } else {
+            self.cpu.reg.a = result as u8;
+        }
+
+        // Set flag values
+        self.cpu.flags.negative = (result & 0x80) != 0;
+        self.cpu.flags.zero = (result & 0xff) == 0;
+        self.cpu.flags.carry = (result & 0x01) != 0;
+
+        // self.cpu.flags.interrupt = result & 0x04;
+        // self.cpu.flags.decimal = result & 0x08;
+        // self.cpu.flags.overflow = result & 0x40;
         self.adv_pc(2);
         self.adv_cycles(5);
     }
     fn ror(&mut self, mode: AddressMode) {
         unimplemented!();
         match mode {
+            AddressMode::Accumulator => {},
             AddressMode::ZeroPage => {},
             AddressMode::ZeroPageX => {},
             AddressMode::ZeroPageY => {},
