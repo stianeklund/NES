@@ -37,8 +37,9 @@ impl MemoryMapper for ExecutionContext {
             // but it can be partly or fully remapped to RAM on the cartridge,
             // allowing up to 4 simultaneous nametables.
             0x2000 ... 0x3fff => self.ppu.vram[addr as usize & 0x2efff] = byte,
+            0x4000 ... 0x4017 => eprintln!("Trying to write: {:04x} in NES APU & I/O space", addr),
             0x8000...0xffff => self.cart.prg[addr as usize & 0x3fff] = byte,
-            _ => eprintln!("Unable to write to memory address"),
+            _ => eprintln!("Trying to write to memory address {:04x}", addr),
         };
     }
 }
@@ -167,21 +168,30 @@ impl ExecutionContext {
             0x00 => self.brk(),
             0x01 => self.bpl(),
             0x04 => self.rti(),
-            0x06 => self.asl(),
+            0x06 => self.asl(AddressMode::ZeroPage),
             0x07 => self.slo(AddressMode::ZeroPage),
+            0x08 => self.php(),
+            0x09 => self.ora(AddressMode::Immediate),
             0x10 => self.bpl(),
+            0x16 => self.asl(AddressMode::ZeroPageX),
+            0x18 => self.clc(),
+            0x0e => self.asl(AddressMode::Absolute),
+            0x0a => self.asl(AddressMode::Accumulator),
             0xa0 => self.ldy(AddressMode::Immediate),
             0xa1 => self.lda(AddressMode::IndirectX),
             0xa2 => self.lda(AddressMode::Immediate),
+            0xa4 => self.ldy(AddressMode::ZeroPage),
             0xa5 => self.lda(AddressMode::ZeroPage),
             0xad => self.lda(AddressMode::Absolute),
             0xa9 => self.lda(AddressMode::Immediate),
+            0xb0 => self.bcs(),
             0xb1 => self.lda(AddressMode::IndirectY),
             0xb5 => self.lda(AddressMode::ZeroPageX),
             0xb8 => self.clv(),
             0xb9 => self.lda(AddressMode::AbsoluteY),
             0xbd => self.lda(AddressMode::AbsoluteX),
             0x40 => self.rti(),
+            0x4a => self.lsr(),
             0x4e => self.lsr(),
             0x48 => self.pha(),
             0x2a => self.rol(AddressMode::Accumulator),
@@ -189,6 +199,7 @@ impl ExecutionContext {
             0x20 => self.jsr(),
             0x24 => self.bit(AddressMode::ZeroPage),
             0x29 => self.and(AddressMode::Immediate),
+            0x30 => self.bmi(),
             0x2d => self.and(AddressMode::Absolute),
             0x3e => self.rol(AddressMode::AbsoluteX),
             0x4c => self.jmp(),
@@ -211,6 +222,7 @@ impl ExecutionContext {
             0x86 => self.stx(AddressMode::ZeroPage),
             0x8d => self.sta(AddressMode::Absolute),
             0x8e => self.stx(AddressMode::Absolute),
+            0x90 => self.bcc(),
             0x91 => self.sta(AddressMode::IndirectY),
             0x9a => self.txs(),
             0x9d => self.sta(AddressMode::AbsoluteX),
@@ -222,16 +234,19 @@ impl ExecutionContext {
             0xd3 => self.dcp(),
             0xd6 => self.dec(AddressMode::ZeroPageX),
             0xd8 => self.cld(),
+            0xd9 => self.cmp(AddressMode::AbsoluteY),
             0xde => self.dec(AddressMode::AbsoluteX),
             0xdf => self.dcp(),
             0xe6 => self.inc(AddressMode::ZeroPage),
             0xe8 => self.inx(),
+            0xea => self.nop(),
             0xec => self.cpx(),
             0xc8 => self.iny(),
             0xf0 => self.beq(),
             0xf6 => self.inc(AddressMode::ZeroPage),
             0xf7 => self.isc(AddressMode::ZeroPageX),
             0xff => self.isc(AddressMode::AbsoluteX),
+            0x1e => self.asl(AddressMode::AbsoluteX),
             _ => eprintln!("Not implemented"),
         }
         self.cpu.opcode = opcode as u8;
@@ -267,9 +282,23 @@ impl ExecutionContext {
         }
     }
     // Arithmetic shift left zero page
-    fn asl(&mut self) {
+    fn asl(&mut self, mode: AddressMode) {
+        // TODO Addressing modes
+        match mode {
+            AddressMode::Accumulator => {},
+            AddressMode::ZeroPage => {},
+            AddressMode::ZeroPageX => {},
+            AddressMode::ZeroPageY => {},
+            AddressMode::Immediate => {},
+            AddressMode::Absolute => {},
+            AddressMode::AbsoluteX => {},
+            AddressMode::AbsoluteY => {},
+            AddressMode::Indirect => {},
+            AddressMode::IndirectX => {},
+            AddressMode::IndirectY => {},
+        }
         let carry = (self.cpu.reg.a & 1) != 0;
-        let value = self.ram.memory[self.cpu.reg.pc as usize];
+        let value = self.read(self.cpu.reg.pc);
         // Check if 7th bit has been set
         // Shift left by one
         let mut result = value << 1;
@@ -305,13 +334,45 @@ impl ExecutionContext {
         self.cpu.flags.negative = (self.cpu.reg.a & 0x80) != 0;
         self.cpu.flags.zero = (self.cpu.reg.a & 0xff) == 0;
     }
-
+    // Branch if Carry Set
+    fn bcs(&mut self) {
+        if self.cpu.flags.carry {
+            let offset = self.read(self.cpu.reg.pc + 1);
+            self.cpu.reg.pc += offset as u16;
+            self.adv_cycles(1);
+        } else {
+            self.adv_pc(2);
+        }
+        self.adv_cycles(2);
+    }
+    // TODO Can we just call !bcs instead?
+    fn bcc(&mut self) {
+        if !self.cpu.flags.carry {
+            let offset = self.read(self.cpu.reg.pc + 1);
+            self.cpu.reg.pc += offset as u16;
+            self.adv_cycles(1);
+        } else {
+            self.adv_pc(2);
+        }
+        self.adv_cycles(2);
+    }
     // Branch on Equal
     fn beq(&mut self) {
         if self.cpu.flags.zero {
             let offset = self.read(self.cpu.reg.pc + 1);
             println!("Offset:{:02x}", offset);
             self.cpu.reg.pc = (self.cpu.reg.pc as i16 + offset as i16) as u16;
+            self.adv_cycles(1);
+        } else {
+            self.adv_pc(2);
+        }
+        self.adv_cycles(2);
+    }
+    // Branch if Minus
+    fn bmi(&mut self) {
+        if !self.cpu.flags.negative {
+            let offset = self.read(self.cpu.reg.pc + 1);
+            self.cpu.reg.pc += offset as u16;
             self.adv_cycles(1);
         } else {
             self.adv_pc(2);
@@ -419,7 +480,16 @@ impl ExecutionContext {
             },
             AddressMode::Absolute => {},
             AddressMode::AbsoluteX => {},
-            AddressMode::AbsoluteY => {},
+            AddressMode::AbsoluteY => {
+                let value = self.read(self.cpu.reg.pc + 1).wrapping_add(self.cpu.reg.y);
+                let result = self.cpu.reg.a.wrapping_sub(value);
+
+                self.cpu.flags.negative = (result & 0x80) != 0;
+                self.cpu.flags.zero = (result & 0xff) == 0;
+                self.cpu.flags.carry = (result & 0x01) != 0;
+                self.adv_cycles(4);
+                self.adv_pc(3);
+            },
             AddressMode::Indirect => {},
             AddressMode::IndirectX => {},
             AddressMode::IndirectY => {},
@@ -683,6 +753,28 @@ impl ExecutionContext {
         self.adv_pc(1);
         self.adv_cycles(2);
     }
+    // TODO
+    fn ora(&mut self, mode: AddressMode) {
+        match mode {
+            AddressMode::Accumulator => {},
+            AddressMode::ZeroPage => {},
+            AddressMode::ZeroPageX => {},
+            AddressMode::ZeroPageY => {},
+            AddressMode::Immediate => { self.adv_cycles(2); self.adv_pc(2); },
+            AddressMode::Absolute => {},
+            AddressMode::AbsoluteX => {},
+            AddressMode::AbsoluteY => {},
+            AddressMode::Indirect => {},
+            AddressMode::IndirectX => {},
+            AddressMode::IndirectY => {},
+        }
+        let value = self.read(self.cpu.reg.pc + 1);
+        self.cpu.reg.a = value & self.cpu.reg.a;
+
+        self.cpu.flags.negative = (self.cpu.reg.a & 0x80) != 0;
+        self.cpu.flags.zero = (self.cpu.reg.a & 0xff) == 0;
+
+    }
 
     // Rotate one bit right memory or accumulator
     fn rol(&mut self, mode: AddressMode) {
@@ -887,6 +979,20 @@ impl ExecutionContext {
     // Push accumulator
     fn pha(&mut self) {
         self.push_byte(self.cpu.reg.a);
+        self.adv_pc(1);
+        self.adv_cycles(3);
+    }
+    // Push Processor Status
+    fn php(&mut self) {
+        // Pushes a copy of the status flags to the stack
+
+        let ps = if self.cpu.flags.negative { 0x80 } else { 0x0 } |
+            if self.cpu.flags.zero { 0x40 } else { 0x0 } |
+            if self.cpu.flags.carry { 0x10 } else { 0x0 } | 0x02 |
+            if self.cpu.flags.interrupt { 0x04 } else { 0x0 } |
+            if self.cpu.flags.decimal { 0x01 } else { 0x0 };
+
+        self.push_byte(ps);
         self.adv_pc(1);
         self.adv_cycles(3);
     }
