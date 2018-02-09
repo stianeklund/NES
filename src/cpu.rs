@@ -169,6 +169,7 @@ impl ExecutionContext {
             0x01 => self.bpl(),
             0x03 => self.slo(AddressMode::IndirectX),
             0x04 => self.rti(),
+            0x05 => self.ora(AddressMode::ZeroPage),
             0x06 => self.asl(AddressMode::ZeroPage),
             0x07 => self.slo(AddressMode::ZeroPage),
             0x08 => self.php(),
@@ -196,6 +197,7 @@ impl ExecutionContext {
             0x4a => self.lsr(),
             0x4e => self.lsr(),
             0x48 => self.pha(),
+            0x28 => self.plp(),
             0x2a => self.rol(AddressMode::Accumulator),
             0x2e => self.rol(AddressMode::Absolute),
             0x20 => self.jsr(),
@@ -250,6 +252,7 @@ impl ExecutionContext {
             0xf0 => self.beq(),
             0xf6 => self.inc(AddressMode::ZeroPage),
             0xf7 => self.isc(AddressMode::ZeroPageX),
+            0xf8 => self.sed(),
             0xff => self.isc(AddressMode::AbsoluteX),
             0x1e => self.asl(AddressMode::AbsoluteX),
             _ => eprintln!("Decoding opcode not implemented"),
@@ -535,10 +538,10 @@ impl ExecutionContext {
     // Decrement & compare
     fn dcp(&mut self) {
         println!("DCP (illegal opcode)");
-        let data = self.cart.prg[self.cpu.reg.pc as usize + 2];
-        println!("Data:{:04x}", data);
+        let data = self.read(self.cpu.reg.pc + 2);
         self.adv_pc(2);
         self.adv_cycles(7);
+        unimplemented!();
     }
     // Double NOP
     fn dop(&mut self, mode: AddressMode) {
@@ -786,7 +789,9 @@ impl ExecutionContext {
     fn ora(&mut self, mode: AddressMode) {
         match mode {
             AddressMode::Accumulator => {},
-            AddressMode::ZeroPage => {},
+            AddressMode::ZeroPage => {
+
+            },
             AddressMode::ZeroPageX => {},
             AddressMode::ZeroPageY => {},
             AddressMode::Immediate => { self.adv_cycles(2); self.adv_pc(2); },
@@ -898,6 +903,11 @@ impl ExecutionContext {
         // TODO store flags & pop pc
         self.adv_pc(1);
         self.adv_cycles(6);
+    }
+    fn sed(&mut self) {
+        self.cpu.flags.decimal = true;
+        self.adv_pc(1);
+        self.adv_cycles(2);
     }
     // Shift left one bit in memory, then OR the result with the accumulator
     // Part of undocumented opcodes
@@ -1083,9 +1093,21 @@ impl ExecutionContext {
         self.cpu.flags.negative = (value & 0x80) != 0;
 
         self.cpu.reg.a = value;
+        self.adv_pc(1);
+        self.adv_cycles(4);
+    }
+    fn plp(&mut self) {
+        // Pulls status flags from the stack and assigns them to each respective CPU flag
 
+        self.pull_byte(self.cpu.reg.sp);
+        let value = self.cpu.reg.sp;
 
-
+        // TODO Check order
+        self.cpu.flags.negative = value & 0x80 != 0;
+        self.cpu.flags.zero = value & 0x40 != 0;
+        self.cpu.flags.carry = value & 0x10 != 0;
+        self.cpu.flags.interrupt = value & 0x04 != 0;
+        self.cpu.flags.decimal = value & 0x01 != 0;
 
         self.adv_pc(1);
         self.adv_cycles(4);

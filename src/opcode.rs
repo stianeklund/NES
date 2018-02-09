@@ -56,6 +56,7 @@ impl Instruction {
             0x02 => "ORA (a8, X)    ",
             0x03 => "SLO Indirect X ",
             0x04 => "RTI            ",
+            0x05 => "ORA Zero Page  ",
             0x06 => "ASL Zero Page  ",
             0x08 => "PHP            ",
             0x09 => "ORA Immediate  ",
@@ -96,6 +97,7 @@ impl Instruction {
             0x1b => "SLO Absolute Y ",
             0x20 => "JSR            ",
             0x24 => "BIT Zero Page  ",
+            0x28 => "PLP            ",
             0x29 => "AND A8         ",
             0x30 => "BMI            ",
             0x38 => "SEC            ",
@@ -138,6 +140,7 @@ impl Instruction {
             0xf0 => "BEQ            ",
             0xf6 => "INC Zero Page  ",
             0xf7 => "ISC Zero Page X",
+            0xf8 => "SED            ",
             0xff => "ISC Absolute X ",
             _    => "Opcode not in print table",
         }
