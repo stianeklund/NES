@@ -167,6 +167,7 @@ impl ExecutionContext {
         match opcode {
             0x00 => self.brk(),
             0x01 => self.bpl(),
+            0x03 => self.slo(AddressMode::IndirectX),
             0x04 => self.rti(),
             0x06 => self.asl(AddressMode::ZeroPage),
             0x07 => self.slo(AddressMode::ZeroPage),
@@ -182,8 +183,9 @@ impl ExecutionContext {
             0xa2 => self.lda(AddressMode::Immediate),
             0xa4 => self.ldy(AddressMode::ZeroPage),
             0xa5 => self.lda(AddressMode::ZeroPage),
-            0xad => self.lda(AddressMode::Absolute),
             0xa9 => self.lda(AddressMode::Immediate),
+            0xad => self.lda(AddressMode::Absolute),
+            0xaf => self.lax(AddressMode::Absolute),
             0xb0 => self.bcs(),
             0xb1 => self.lda(AddressMode::IndirectY),
             0xb5 => self.lda(AddressMode::ZeroPageX),
@@ -199,10 +201,12 @@ impl ExecutionContext {
             0x20 => self.jsr(),
             0x24 => self.bit(AddressMode::ZeroPage),
             0x29 => self.and(AddressMode::Immediate),
-            0x30 => self.bmi(),
             0x2d => self.and(AddressMode::Absolute),
+            0x30 => self.bmi(),
+            0x38 => self.sec(),
             0x3e => self.rol(AddressMode::AbsoluteX),
             0x4c => self.jmp(),
+            0x50 => self.bvs(),
             0x5a => self.nop(),
             0x60 => self.rts(),
             0x61 => self.adc(AddressMode::IndirectX),
@@ -224,6 +228,7 @@ impl ExecutionContext {
             0x8e => self.stx(AddressMode::Absolute),
             0x90 => self.bcc(),
             0x91 => self.sta(AddressMode::IndirectY),
+            0x96 => self.stx(AddressMode::ZeroPageY),
             0x9a => self.txs(),
             0x9d => self.sta(AddressMode::AbsoluteX),
             0xc3 => self.dcp(),
@@ -247,7 +252,7 @@ impl ExecutionContext {
             0xf7 => self.isc(AddressMode::ZeroPageX),
             0xff => self.isc(AddressMode::AbsoluteX),
             0x1e => self.asl(AddressMode::AbsoluteX),
-            _ => eprintln!("Not implemented"),
+            _ => eprintln!("Decoding opcode not implemented"),
         }
         self.cpu.opcode = opcode as u8;
         self.cpu.reg.prev_pc = self.cpu.reg.pc;
@@ -359,8 +364,8 @@ impl ExecutionContext {
     // Branch on Equal
     fn beq(&mut self) {
         if self.cpu.flags.zero {
-            let offset = self.read(self.cpu.reg.pc + 1);
-            println!("Offset:{:02x}", offset);
+            let offset = self.read(self.cpu.reg.pc + 2);
+            println!("Branching");
             self.cpu.reg.pc = (self.cpu.reg.pc as i16 + offset as i16) as u16;
             self.adv_cycles(1);
         } else {
@@ -505,30 +510,26 @@ impl ExecutionContext {
     fn dec(&mut self, mode: AddressMode) {
         // TODO
         match mode {
-            AddressMode:: Accumulator => {},
+            AddressMode::Accumulator => {},
             AddressMode::ZeroPage => {},
             AddressMode::ZeroPageX => {},
             AddressMode::ZeroPageY => {},
             AddressMode::Immediate => {},
-            AddressMode::Absolute => {},
+            AddressMode::Absolute => {
+                let mut data = self.read_word(self.cpu.reg.pc + 1);
+                data -= 1;
+                self.cpu.flags.zero = (data & 0xff) == 0;
+                self.cpu.flags.negative = (data & 0x80) != 0;
+                self.adv_cycles(6);
+                self.adv_pc(3);
+            },
             AddressMode::AbsoluteX => {},
             AddressMode::AbsoluteY => {},
             AddressMode::Indirect => {},
             AddressMode::IndirectX => {},
             AddressMode::IndirectY => {},
-        }
-        let mut data = self.read_word(self.cpu.reg.pc + 1);
+        };
 
-        // Decrement memory value to be compared
-        data -= 1;
-
-        // Should decremented value be stored anywhere?
-        // self.ram[data];
-        self.cpu.flags.zero = (data & 0xff) == 0;
-        // If bit 7 of the decremented result is set set flag
-        self.cpu.flags.negative = (data & 0x80) != 0;
-        self.adv_pc(3);
-        self.adv_cycles(7);
 
     }
     // Decrement & compare
@@ -543,7 +544,10 @@ impl ExecutionContext {
     fn dop(&mut self, mode: AddressMode) {
         match mode {
             AddressMode::Accumulator => {},
-            AddressMode::ZeroPage => { self.adv_cycles(3); self.adv_pc(2)},
+            AddressMode::ZeroPage => {
+                self.adv_cycles(3);
+                self.adv_pc(2)
+            },
             AddressMode::ZeroPageX => {},
             AddressMode::ZeroPageY => {},
             AddressMode::Immediate => {},
@@ -555,6 +559,33 @@ impl ExecutionContext {
             AddressMode::IndirectY => {},
         }
 
+    }
+    fn lax(&mut self, mode: AddressMode) {
+        // Load both the accumulator and the X register with contents of a memory location
+
+        // LAX abcd        ;AF cd ab    ;No. Cycles= 4
+        // LAX abcd,Y      ;BF cd ab    ;            4*
+        // LAX ab          ;A7 ab       ;*=add 1     3
+        // LAX ab,Y        ;B7 ab       ;if page     4
+        // LAX (ab,X)      ;A3 ab       ;boundary    6
+        // LAX (ab),Y      ;B3 ab       ;is crossed  5*
+        // (Sub-instructions: LDA, LDX)
+        match mode {
+            AddressMode::Accumulator => {},
+            AddressMode::ZeroPage => {},
+            AddressMode::ZeroPageX => {},
+            AddressMode::ZeroPageY => {},
+            AddressMode::Immediate => {},
+            AddressMode::Absolute => {
+                self.adv_cycles(4);
+                self.adv_pc(2);
+            },
+            AddressMode::AbsoluteX => {},
+            AddressMode::AbsoluteY => {},
+            AddressMode::Indirect => {},
+            AddressMode::IndirectX => {},
+            AddressMode::IndirectY => {},
+        }
     }
     fn ldy(&mut self, mode: AddressMode) {
         // TODO Handle page boundary crossing
@@ -586,18 +617,18 @@ impl ExecutionContext {
                 self.adv_pc(3);
             }
             AddressMode::IndirectX => {
-                unimplemented!();
-                let data = self.read_word(self.cpu.reg.pc + 1);
-                self.cpu.reg.y = data as u8;
-                // TODO Cycles is 5 if page boundry is crossed
+                let data = self.read(self.cpu.reg.pc + 2) + self.cpu.reg.x & 0xff;
+                let addr = (self.read(data as u16) as u16 | self.read(data as u16 + 1) as u16) << 8;
+                self.cpu.reg.y = self.read(addr as u16) & 0xff;
                 self.cpu.flags.zero = (data & 0xff) == 0;
                 self.cpu.flags.negative = (data & 0x80) != 0;
                 self.adv_cycles(2);
                 self.adv_pc(2);
             }
             AddressMode::IndirectY => {
-                let data = self.read_word(self.cpu.reg.pc + 1);
-                self.cpu.reg.y = data as u8;
+                let data = self.read(self.cpu.reg.pc + 2) + self.cpu.reg.y & 0xff;
+                let addr = (self.read(data as u16) as u16 | self.read(data as u16 + 1) as u16) << 8;
+                self.cpu.reg.y = self.read(addr as u16) & 0xff;
                 self.cpu.flags.zero = (data & 0xff) == 0;
                 self.cpu.flags.negative = (data & 0x80) != 0;
                 // TODO Cycles is 5 if page boundry is crossed
@@ -676,28 +707,26 @@ impl ExecutionContext {
                 self.adv_pc(3);
             }
             AddressMode::IndirectX => {
-                // TODO Is this correct?
-                let data = self.read_word(self.cpu.reg.pc + 1);
-                // Our target address
-                let addr = self.cpu.reg.x as u16 + data;
-                // Read value from our target address & assign to accumulator
-                self.cpu.reg.a = self.read(addr) & 0xff;
+                let data = (self.read(self.cpu.reg.pc + 2) as u16) + (self.cpu.reg.x & 0xff) as u16;
+                let addr = (self.read(data) as u16 | self.read(data+ 1) as u16) << 8;
+                self.cpu.reg.a = self.read(addr as u16) & 0xff;
+
                 self.cpu.flags.zero = (data & 0xff) == 0;
                 self.cpu.flags.negative = (data & 0x80) != 0;
                 self.adv_cycles(6);
                 self.adv_pc(2);
             }
             AddressMode::IndirectY => {
-                // TODO Is this correct?
-                let data = self.read_word(self.cpu.reg.pc + 1);
-                // Our target address
-                let addr = self.cpu.reg.y as u16 + data;
-                // Read value from our target address & assign to accumulator
-                self.cpu.reg.a = self.read(addr) & 0xff;
+                // Indirect is 3 bytes
+                let data = (self.read(self.cpu.reg.pc + 2) as u16) + (self.cpu.reg.y & 0xff) as u16;
+                let addr = (self.read(data) as u16 | self.read(data + 1) as u16) << 8;
+                self.cpu.reg.a = self.read(addr as u16) & 0xff;
+
                 self.cpu.flags.zero = (data & 0xff) == 0;
                 self.cpu.flags.negative = (data & 0x80) != 0;
+
                 // TODO Cycles is 6 if page boundry is crossed?
-                self.adv_cycles(5);
+                self.adv_cycles(6);
                 self.adv_pc(2);
             }
             AddressMode::Immediate => {
@@ -870,10 +899,39 @@ impl ExecutionContext {
         self.adv_pc(1);
         self.adv_cycles(6);
     }
-    // Shift left one bit in memory, then OR accumulator with memory.
+    // Shift left one bit in memory, then OR the result with the accumulator
     // Part of undocumented opcodes
     fn slo(&mut self, mode: AddressMode) {
-        unimplemented!()
+        match mode {
+            AddressMode::Accumulator => {
+                // Shift memory value one bit left
+                let value = self.read(self.cpu.reg.pc + 1) << 1;
+                let result = self.cpu.reg.a | value;
+                self.cpu.reg.a = result;
+                self.cpu.flags.carry = self.cpu.reg.a & 0x80 != 0;
+                self.cpu.flags.zero = self.cpu.reg. a & 0xff == 0;
+            },
+            AddressMode::ZeroPage => {},
+            AddressMode::ZeroPageX => {},
+            AddressMode::ZeroPageY => {},
+            AddressMode::Immediate => {},
+            AddressMode::Absolute => {},
+            AddressMode::AbsoluteX => {},
+            AddressMode::AbsoluteY => {},
+            AddressMode::Indirect => {},
+            AddressMode::IndirectX => {
+                // Shift memory value one bit left
+                let value = self.read(self.cpu.reg.pc + 1) << 1 + self.cpu.reg.x;
+                let result = self.cpu.reg.a | value;
+                self.cpu.reg.a = result;
+                self.cpu.flags.carry = self.cpu.reg.a & 0x80 != 0;
+                self.cpu.flags.zero = self.cpu.reg. a & 0xff == 0;
+                self.adv_pc(2);
+                self.adv_cycles(2);
+            },
+            AddressMode::IndirectY => {},
+        }
+
     }
     fn sta(&mut self, mode: AddressMode) {
         // Ex: Absolute: STA $4400 Hex: $8D Len: 3 Cycles:4
@@ -948,6 +1006,22 @@ impl ExecutionContext {
                 self.adv_cycles(3);
                 self.adv_pc(2);
             }
+            AddressMode::ZeroPageX => {
+                let data = self.read_word(self.cpu.reg.pc + 1) & 0xff + self.cpu.reg.x as u16;
+                self.write(data, self.cpu.reg.x);
+                self.cpu.flags.zero = (data & 0xff) == 0;
+                self.cpu.flags.negative = (data & 0x80) != 0;
+                self.adv_cycles(2);
+                self.adv_pc(2);
+            }
+            AddressMode::ZeroPageY => {
+                let data = self.read_word(self.cpu.reg.pc + 1) & 0xff + self.cpu.reg.y as u16;
+                self.write(data, self.cpu.reg.y);
+                self.cpu.flags.zero = (data & 0xff) == 0;
+                self.cpu.flags.negative = (data & 0x80) != 0;
+                self.adv_cycles(2);
+                self.adv_pc(2);
+            }
             _ => eprintln!("{:?} not covered", mode),
         }
     }
@@ -986,6 +1060,7 @@ impl ExecutionContext {
     fn php(&mut self) {
         // Pushes a copy of the status flags to the stack
 
+        // TODO Check order
         let ps = if self.cpu.flags.negative { 0x80 } else { 0x0 } |
             if self.cpu.flags.zero { 0x40 } else { 0x0 } |
             if self.cpu.flags.carry { 0x10 } else { 0x0 } | 0x02 |
@@ -1078,9 +1153,14 @@ impl ExecutionContext {
         // let pc = self.cpu.reg.pc + 1;
         // let addr = self.read_word(pc);
         self.cpu.reg.prev_pc = self.cpu.reg.pc;
-        println!("JMP Addr:{:04x}, next addr:{:04x}", self.read_word(self.cpu.reg.pc), self.read_word(self.cpu.reg.pc + 1));
         self.cpu.reg.pc = self.read_word(self.cpu.reg.pc + 1);
         self.adv_cycles(3);
+    }
+    fn sec(&mut self) {
+        self.cpu.flags.carry = true;
+        self.adv_cycles(2);
+        self.adv_pc(1);
+
     }
     fn sei(&mut self) {
         self.cpu.flags.interrupt = true;
