@@ -900,21 +900,62 @@ impl ExecutionContext {
         // self.cpu.flags.overflow = result & 0x40;
     }
     fn ror(&mut self, mode: AddressMode) {
-        unimplemented!();
-        match mode {
-            AddressMode::Accumulator => {},
-            AddressMode::ZeroPage => {},
-            AddressMode::ZeroPageX => {},
-            AddressMode::ZeroPageY => {},
-            AddressMode::Immediate => {},
-            AddressMode::Absolute => {},
-            AddressMode::AbsoluteX => {},
-            AddressMode::AbsoluteY => {},
-            AddressMode::Indirect => {},
-            AddressMode::IndirectX => {},
-            AddressMode::IndirectY => {},
+        let mut pc = self.cpu.reg.pc;
+
+        let mut src: u16 = match mode {
+            AddressMode::Accumulator => {
+                self.adv_cycles(2);
+                self.adv_pc(1);
+                self.cpu.reg.a as u16
+            }
+            AddressMode::ZeroPage => {
+                self.adv_cycles(5);
+                self.adv_pc(2);
+                self.read_word(pc) & 0xff as u16
+            }
+            AddressMode::ZeroPageX => {
+                self.adv_cycles(6);
+                self.adv_pc(2);
+                self.read_word(pc) & 0xff + self.cpu.reg.x as u16
+            }
+            AddressMode::Absolute => {
+                self.adv_cycles(6);
+                self.adv_pc(3);
+                self.read_word(pc) as u16
+            }
+            AddressMode::AbsoluteX => {
+                self.adv_cycles(7);
+                self.adv_pc(3);
+                self.read_word(pc) + self.cpu.reg.x as u16
+            }
+            _ => { unreachable!("Address mode {:?} should not be called on ROL", mode) }
+        };
+
+        // TODO Investigate result
+        // Assuming the slot is the same but the bit shift direction changes due to it being a
+        // Rotate Right instruction
+        // Original bit is shifted into carry slot & carry is shifted into bit 7.
+        let result = src >> 1 & 0xfe;
+
+        // The program counter is already modified by this point by the above `match`.
+        let addr = self.cpu.reg.pc;
+
+        // Write result to memory address or accumulator
+        println!("Writing :{:04x} to address:{:04x}", result, addr);
+        if mode != AddressMode::Accumulator {
+            self.write(addr, result as u8);
+        } else {
+            self.cpu.reg.a = result as u8;
         }
 
+        // Set flag values
+        self.cpu.flags.negative = (result & 0x80) != 0;
+        self.cpu.flags.zero = (result & 0xff) == 0;
+        self.cpu.flags.carry = (result & 0x01) != 0;
+
+        // self.cpu.flags.interrupt = result & 0x04;
+        // self.cpu.flags.decimal = result & 0x08;
+        // self.cpu.flags.overflow = result & 0x40;
     }
     fn rts(&mut self) {
         let low = self.read(self.cpu.reg.sp as u16);
