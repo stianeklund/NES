@@ -10,7 +10,8 @@ impl MemoryMapper for ExecutionContext {
         match addr {
             // See https://wiki.nesdev.com/w/index.php/CPU_memory_map
             0...0x07ff => self.ram.memory[addr as usize] as u8,
-            // 0...0x2007 => self.ppu[addr] // TODO
+            // PPU addressing is not implemented yet
+            0...0x2007 => unimplemented!("Trying to read PPU address space, not implemented"),
             // RAM Mirror
             0x0800...0x1fff => self.ram.memory[addr as usize & 0x07ff],
             0x2000 ... 0x3fff => self.ppu.vram[addr as usize & 0x2efff],
@@ -32,10 +33,12 @@ impl MemoryMapper for ExecutionContext {
         match addr {
             0...0x07ff => self.ram.memory[addr as usize] = byte,
             0x0800...0x1fff => self.ram.memory[addr as usize & 0x07ff] = byte,
+
             // $2000-2FFF is normally mapped to the 2kB NES internal VRAM,
             // providing 2 nametables with a mirroring configuration controlled by the cartridge,
             // but it can be partly or fully remapped to RAM on the cartridge,
             // allowing up to 4 simultaneous nametables.
+
             0x2000 ... 0x3fff => self.ppu.vram[addr as usize & 0x2efff] = byte,
             0x4000 ... 0x4017 => eprintln!("Trying to write: {:04x} in NES APU & I/O space", addr),
             0x8000...0xffff => self.cart.prg[addr as usize & 0x3fff] = byte,
@@ -80,7 +83,6 @@ impl Registers {
         }
     }
 }
-
 
 pub struct Cpu {
     pub reg: Registers,
@@ -273,16 +275,17 @@ impl ExecutionContext {
         // Debug print CPU values
         println!("{:?}", self.cpu);
     }
-    // TODO
+
     fn adc(&mut self, mode: AddressMode) {
         let mem_value = self.read(self.cpu.reg.pc);
         let result = (self.cpu.reg.a as u16).wrapping_add(mem_value as u16).wrapping_add(self.cpu.flags.carry as u16);
         self.cpu.reg.a = result as u8;
 
-        // TODO Overflow flag?
         self.cpu.flags.carry = (self.cpu.reg.a & 0x01) != 0;
         self.cpu.flags.negative = (self.cpu.reg.a & 0x80) != 0;
         self.cpu.flags.zero = (self.cpu.reg.a & 0xff) == 0;
+        // Set to 1 if last ADC resulted in a signed overflow
+        // self.cpu.flags.overflow = (self.cpu.reg.a &
 
         match mode {
             AddressMode::Accumulator => {},
@@ -928,7 +931,7 @@ impl ExecutionContext {
                 self.adv_pc(3);
                 self.read_word(pc) + self.cpu.reg.x as u16
             }
-            _ => { unreachable!("Address mode {:?} should not be called on ROL", mode) }
+            _ => { unreachable!("Address mode {:?} should not be called on ROR", mode) }
         };
 
         // TODO Investigate result
@@ -989,6 +992,40 @@ impl ExecutionContext {
         self.cpu.flags.decimal = true;
         self.adv_pc(1);
         self.adv_cycles(2);
+    }
+
+    fn sbc(&mut self, mode: AddressMode) {
+        let mem = self.read(self.cpu.reg.pc) as u16;
+        // XOR memory value with 255 to set if result is 0 to 255, or clear if less than 0.
+        let a = self.cpu.reg.a as u16;
+
+        let result = (a).wrapping_add(mem ^ 0xff).wrapping_add(self.cpu.flags.carry as u16);
+
+        // Check for overflow
+        let overflow = a.overflowing_add(mem ^ 0xffu16.wrapping_add(self.cpu.flags.carry as u16));
+        // overflowing_add(self, rhs: u16) -> (u16, bool)
+        self.cpu.flags.overflow = overflow.1;
+
+        self.cpu.reg.a = result as u8;
+
+        self.cpu.flags.carry = (self.cpu.reg.a & 0x01) != 0;
+        self.cpu.flags.negative = (self.cpu.reg.a & 0x80) != 0;
+        self.cpu.flags.zero = (self.cpu.reg.a & 0xff) == 0;
+
+        // TODO set cycle & program counter lengths
+        match mode {
+            AddressMode::Accumulator => {},
+            AddressMode::ZeroPage => {},
+            AddressMode::ZeroPageX => {},
+            AddressMode::ZeroPageY => {},
+            AddressMode::Immediate => { self.adv_pc(2); self.adv_cycles(2); },
+            AddressMode::Absolute => { self.adv_pc(3); self.adv_cycles(4); },
+            AddressMode::AbsoluteX => {},
+            AddressMode::AbsoluteY => {},
+            AddressMode::Indirect => {},
+            AddressMode::IndirectX => {},
+            AddressMode::IndirectY => {},
+        }
     }
     // Shift left one bit in memory, then OR the result with the accumulator
     // Part of undocumented opcodes
