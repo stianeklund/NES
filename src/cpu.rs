@@ -277,15 +277,16 @@ impl ExecutionContext {
     }
 
     fn adc(&mut self, mode: AddressMode) {
-        let mem_value = self.read(self.cpu.reg.pc);
-        let result = (self.cpu.reg.a as u16).wrapping_add(mem_value as u16).wrapping_add(self.cpu.flags.carry as u16);
+        let mem = self.read(self.cpu.reg.pc) as u16;
+        let a = self.cpu.reg.a as u16;
+        let (result, overflow) = a.overflowing_add(mem.wrapping_add(self.cpu.flags.carry as u16));
         self.cpu.reg.a = result as u8;
 
         self.cpu.flags.carry = (self.cpu.reg.a & 0x01) != 0;
         self.cpu.flags.negative = (self.cpu.reg.a & 0x80) != 0;
         self.cpu.flags.zero = (self.cpu.reg.a & 0xff) == 0;
         // Set to 1 if last ADC resulted in a signed overflow
-        // self.cpu.flags.overflow = (self.cpu.reg.a &
+        self.cpu.flags.overflow = overflow;
 
         match mode {
             AddressMode::Accumulator => {},
@@ -999,12 +1000,14 @@ impl ExecutionContext {
         // XOR memory value with 255 to set if result is 0 to 255, or clear if less than 0.
         let a = self.cpu.reg.a as u16;
 
-        let result = (a).wrapping_add(mem ^ 0xff).wrapping_add(self.cpu.flags.carry as u16);
+        // let result = (a).wrapping_add(mem ^ 0xff).wrapping_add(self.cpu.flags.carry as u16);
 
         // Check for overflow
-        let overflow = a.overflowing_add(mem ^ 0xffu16.wrapping_add(self.cpu.flags.carry as u16));
         // overflowing_add(self, rhs: u16) -> (u16, bool)
-        self.cpu.flags.overflow = overflow.1;
+        // let overflow = a.overflowing_add(mem ^ 0xffu16.wrapping_add(self.cpu.flags.carry as u16));
+
+        let (result, overflow) = a.overflowing_add(mem ^ 0xffu16.wrapping_add(self.cpu.flags.carry as u16));
+        self.cpu.flags.overflow = overflow;
 
         self.cpu.reg.a = result as u8;
 
