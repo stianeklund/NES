@@ -302,35 +302,63 @@ impl ExecutionContext {
             AddressMode::IndirectY => {},
         }
     }
-    // Arithmetic shift left zero page
+    // Arithmetic shift left
     fn asl(&mut self, mode: AddressMode) {
-        // TODO Addressing modes
-        match mode {
-            AddressMode::Accumulator => {},
-            AddressMode::ZeroPage => {},
-            AddressMode::ZeroPageX => {},
-            AddressMode::ZeroPageY => {},
-            AddressMode::Immediate => {},
-            AddressMode::Absolute => {},
-            AddressMode::AbsoluteX => {},
-            AddressMode::AbsoluteY => {},
-            AddressMode::Indirect => {},
-            AddressMode::IndirectX => {},
-            AddressMode::IndirectY => {},
-        }
-        let carry = (self.cpu.reg.a & 1) != 0;
-        let value = self.read(self.cpu.reg.pc);
-        // Check if 7th bit has been set
-        // Shift left by one
-        let mut result = value << 1;
+        // ASL shifts all bits left one position. 0 is shifted into bit 0
+        // and the original bit 7 is shifted into the carry slot
+        // Affected flags: S Z C
 
-        self.cpu.flags.carry = (value & 0x80) != 0;
+
+        // ADDR here should change based on address mode, right?
+        let mut pc = self.cpu.reg.pc;
+        let mut addr: u16;
+        match mode {
+            AddressMode::Accumulator => {
+                addr = self.cpu.reg.a as u16;
+                self.adv_pc(1);
+                self.adv_cycles(2);
+            },
+            AddressMode::ZeroPage => {
+                addr = self.read_word(pc + 1) & 0xff;
+                self.adv_pc(2);
+                self.adv_cycles(5);
+            },
+            AddressMode::ZeroPageX => {
+                addr = self.read(pc + 2) as u16 & 0xff + self.cpu.reg.x as u16;
+                self.adv_pc(2);
+                self.adv_cycles(6);
+            },
+            AddressMode::Absolute => {
+                addr = self.read_word(pc + 1);
+                self.adv_pc(3);
+                self.adv_cycles(6);
+            },
+            AddressMode::AbsoluteX => {
+                addr = self.read_word(pc + 1) + self.cpu.reg.x as u16;
+                self.adv_pc(3);
+                self.adv_cycles(7);
+            },
+            // Other addressing modes are not used for ASL
+            _ => unimplemented!()
+        }
+
+        let mut data: u8 = self.read(addr as u16);
+        // Shift data left by one and write it back to memory
+        data.wrapping_shl(1);
+        self.write(addr, data);
+
+        self.cpu.flags.carry =  data >> 1 & 0xfe != 0;
         self.cpu.flags.negative;
         self.cpu.flags.zero;
-        self.cpu.flags.carry = carry;
+
+        // Check if 7th bit has been set
+        // Shift left by one
+        // let mut result = value << 1;
+        // self.cpu.flags.carry = (value & 0x80) != 0;
         self.adv_pc(2);
         self.adv_cycles(6);
     }
+
     // TODO Implement different byte lengths & cycle sizes for each addressing mode
     fn and(&mut self, mode: AddressMode) {
         let mut pc = self.cpu.reg.pc;
@@ -352,13 +380,11 @@ impl ExecutionContext {
         };
 
         let result = self.cpu.reg.a as u16 & data;
-        self.cpu.reg.a =  result as u8; // ((self.cpu.reg.a as u16) & data) as u8;
-
-        self.adv_pc(2);
-        self.adv_cycles(2);
-
+        self.cpu.reg.a =  result as u8;
         self.cpu.flags.negative = (self.cpu.reg.a & 0x80) != 0;
         self.cpu.flags.zero = (self.cpu.reg.a & 0xff) == 0;
+        self.adv_pc(2);
+        self.adv_cycles(2);
     }
     // Branch if Carry Set
     fn bcs(&mut self) {
@@ -371,7 +397,6 @@ impl ExecutionContext {
         }
         self.adv_cycles(2);
     }
-    // TODO Can we just call !bcs instead?
     fn bcc(&mut self) {
         if !self.cpu.flags.carry {
             let offset = self.read(self.cpu.reg.pc + 1);
@@ -522,14 +547,16 @@ impl ExecutionContext {
         }
     }
 
+    // TODO
     fn cpm(&mut self) {
         unimplemented!();
     }
+    // TODO
     fn cpx(&mut self) {
         unimplemented!();
     }
     fn dec(&mut self, mode: AddressMode) {
-        // TODO
+        // TODO Addressing modes
         match mode {
             AddressMode::Accumulator => {},
             AddressMode::ZeroPage => {},
@@ -816,32 +843,36 @@ impl ExecutionContext {
     }
     // TODO
     fn ora(&mut self, mode: AddressMode) {
+        let mut pc = self.cpu.reg.pc;
+        let mut value: u16;
         match mode {
-            AddressMode::Accumulator => {},
             AddressMode::ZeroPage => {
-                let value = self.read(self.cpu.reg.pc + 1) & 0xff;
-                self.cpu.reg.a = value & self.cpu.reg.a;
+                value = (self.read(pc + 1) & 0xff) as u16;
                 self.adv_cycles(3);
                 self.adv_pc(2);
             },
-            AddressMode::ZeroPageX => {},
-            AddressMode::ZeroPageY => {},
+            AddressMode::ZeroPageX => {
+                value = (self.read(pc + 1) & 0xff + self.cpu.reg.x) as u16;
+                self.adv_pc(2);
+                self.adv_cycles(3);
+            },
             AddressMode::Immediate => {
+                value = self.read(pc + 1) as u16;
                 self.adv_cycles(2);
                 self.adv_pc(2);
             },
-            AddressMode::Absolute => {},
-            AddressMode::AbsoluteX => {},
-            AddressMode::AbsoluteY => {},
-            AddressMode::Indirect => {},
-            AddressMode::IndirectX => {},
-            AddressMode::IndirectY => {},
-            _ => {
-                let value = self.read(self.cpu.reg.pc + 1);
-                self.cpu.reg.a = value & self.cpu.reg.a;
-            }
-        }
+            AddressMode::Absolute => {
+                value = self.read_word(pc + 1);
+            },
+            AddressMode::AbsoluteX => unimplemented!(),
+            AddressMode::AbsoluteY => unimplemented!(),
+            AddressMode::Indirect => unimplemented!(),
+            AddressMode::IndirectX => unimplemented!(),
+            AddressMode::IndirectY => unimplemented!(),
+            _ => unimplemented!()
+        };
 
+        self.cpu.reg.a = (value as u8 & self.cpu.reg.a) as u8;
         self.cpu.flags.negative = (self.cpu.reg.a & 0x80) != 0;
         self.cpu.flags.zero = (self.cpu.reg.a & 0xff) == 0;
     }
@@ -935,7 +966,7 @@ impl ExecutionContext {
             _ => { unreachable!("Address mode {:?} should not be called on ROR", mode) }
         };
 
-        // TODO Investigate result
+        // TODO check if result is correct
         // Assuming the slot is the same but the bit shift direction changes due to it being a
         // Rotate Right instruction
         // Original bit is shifted into carry slot & carry is shifted into bit 7.
