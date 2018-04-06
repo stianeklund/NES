@@ -138,7 +138,6 @@ pub struct ExecutionContext {
 }
 #[derive(Debug, PartialEq)]
 enum AddressMode {
-    Accumulator, // Not really an addressing mode but used here for convenience to access it easily
     ZeroPage,    // Zero Page addressing, $00nn
     ZeroPageX,   // $00nn + X
     ZeroPageY,   // $00nn + y
@@ -184,7 +183,7 @@ impl ExecutionContext {
             0x1b => self.slo(AddressMode::AbsoluteY),
             0x1f => self.slo(AddressMode::AbsoluteX),
             0x0e => self.asl(AddressMode::Absolute),
-            0x0a => self.asl(AddressMode::Accumulator),
+            0x0a => self.asla(),
             0xa0 => self.ldy(AddressMode::Immediate),
             0xa1 => self.lda(AddressMode::IndirectX),
             0xa2 => self.lda(AddressMode::Immediate),
@@ -206,7 +205,7 @@ impl ExecutionContext {
             0x4e => self.lsr(),
             0x48 => self.pha(),
             0x28 => self.plp(),
-            0x2a => self.rol(AddressMode::Accumulator),
+            0x2a => self.rola(),
             0x2e => self.rol(AddressMode::Absolute),
             0x20 => self.jsr(),
             0x24 => self.bit(AddressMode::ZeroPage),
@@ -289,7 +288,6 @@ impl ExecutionContext {
         self.cpu.flags.overflow = overflow;
 
         match mode {
-            AddressMode::Accumulator => {},
             AddressMode::ZeroPage => {},
             AddressMode::ZeroPageX => {},
             AddressMode::ZeroPageY => {},
@@ -302,51 +300,50 @@ impl ExecutionContext {
             AddressMode::IndirectY => {},
         }
     }
+    // ASL (Accumulator) helper function for ASL Accumulator
+    fn asla (&mut self) {
+        let data = self.cpu.reg.a << 1;
+        self.cpu.flags.carry =  data >> 1 & 0xfe != 0;
+        self.cpu.flags.negative;
+        self.cpu.reg.a = data as u8;
+        self.adv_pc(1);
+        self.adv_cycles(2);
+    }
+
     // Arithmetic shift left
     fn asl(&mut self, mode: AddressMode) {
         // ASL shifts all bits left one position. 0 is shifted into bit 0
         // and the original bit 7 is shifted into the carry slot
         // Affected flags: S Z C
 
-
-        // ADDR here should change based on address mode, right?
         let mut pc = self.cpu.reg.pc;
-        let mut addr: u16;
-        match mode {
-            AddressMode::Accumulator => {
-                addr = self.cpu.reg.a as u16;
-                self.adv_pc(1);
-                self.adv_cycles(2);
-            },
+       let addr: u16 = match mode {
             AddressMode::ZeroPage => {
-                addr = self.read_word(pc + 1) & 0xff;
                 self.adv_pc(2);
                 self.adv_cycles(5);
+                self.read_word(pc + 1) & 0xff
             },
             AddressMode::ZeroPageX => {
-                addr = self.read(pc + 2) as u16 & 0xff + self.cpu.reg.x as u16;
                 self.adv_pc(2);
                 self.adv_cycles(6);
+                self.read(pc + 2) as u16 & 0xff + self.cpu.reg.x as u16
             },
             AddressMode::Absolute => {
-                addr = self.read_word(pc + 1);
                 self.adv_pc(3);
                 self.adv_cycles(6);
+                self.read_word(pc + 1) as u16
             },
             AddressMode::AbsoluteX => {
-                addr = self.read_word(pc + 1) + self.cpu.reg.x as u16;
                 self.adv_pc(3);
                 self.adv_cycles(7);
+                self.read_word(pc + 1) as u16 + self.cpu.reg.x as u16
             },
-            // Other addressing modes are not used for ASL
             _ => unimplemented!()
-        }
+        };
 
         let mut data: u8 = self.read(addr as u16);
         // Shift data left by one and write it back to memory
-        data.wrapping_shl(1);
-        self.write(addr, data);
-
+        self.write(addr as u16, data << 1);
         self.cpu.flags.carry =  data >> 1 & 0xfe != 0;
         self.cpu.flags.negative;
         self.cpu.flags.zero;
@@ -515,7 +512,6 @@ impl ExecutionContext {
     }
     fn cmp(&mut self, mode: AddressMode) {
         match mode {
-            AddressMode::Accumulator => {},
             AddressMode::ZeroPage => {},
             AddressMode::ZeroPageX => {},
             AddressMode::ZeroPageY => {},
@@ -558,7 +554,6 @@ impl ExecutionContext {
     fn dec(&mut self, mode: AddressMode) {
         // TODO Addressing modes
         match mode {
-            AddressMode::Accumulator => {},
             AddressMode::ZeroPage => {},
             AddressMode::ZeroPageX => {},
             AddressMode::ZeroPageY => {},
@@ -591,7 +586,6 @@ impl ExecutionContext {
     // Double NOP
     fn dop(&mut self, mode: AddressMode) {
         match mode {
-            AddressMode::Accumulator => {},
             AddressMode::ZeroPage => {
                 self.adv_cycles(3);
                 self.adv_pc(2)
@@ -624,7 +618,6 @@ impl ExecutionContext {
         // LAX (ab),Y      ;B3 ab       ;is crossed  5*
         // (Sub-instructions: LDA, LDX)
         match mode {
-            AddressMode::Accumulator => {},
             AddressMode::ZeroPage => {},
             AddressMode::ZeroPageX => {},
             AddressMode::ZeroPageY => {},
@@ -827,6 +820,7 @@ impl ExecutionContext {
 
     }
     // Logical Shift Right
+    // TODO Addressing modes
     fn lsr(&mut self) {
         // Flags affected
         let carry = (self.cpu.reg.a & 1) != 0;
@@ -877,17 +871,25 @@ impl ExecutionContext {
         self.cpu.flags.zero = (self.cpu.reg.a & 0xff) == 0;
     }
 
+    // ROL (accumulator)
+    fn rola(&mut self) {
+        let result = self.cpu.reg.a << 1 & 0xfe;
+        self.cpu.reg.a = result as u8;
+        // Set flag values
+        self.cpu.flags.negative = (result & 0x80) != 0;
+        self.cpu.flags.zero = (result & 0xff) == 0;
+        self.cpu.flags.carry = (result & 0x01) != 0;
+        self.adv_cycles(2);
+        self.adv_pc(1);
+
+
+    }
     // Rotate one bit right memory or accumulator
     fn rol(&mut self, mode: AddressMode) {
 
         let mut pc = self.cpu.reg.pc;
 
         let mut src: u16 = match mode {
-            AddressMode::Accumulator => {
-                self.adv_cycles(2);
-                self.adv_pc(1);
-                self.cpu.reg.a as u16
-            }
             AddressMode::ZeroPage => {
                 self.adv_cycles(5);
                 self.adv_pc(2);
@@ -913,17 +915,9 @@ impl ExecutionContext {
 
         // Original bit is shifted into carry slot & carry is shifted into bit 7.
         let result = src << 1 & 0xfe;
-
         // The program counter is already modified by this point by the above `match`.
         let addr = self.cpu.reg.pc;
-
-        // Write result to memory address or accumulator
-        println!("Writing :{:04x} to address:{:04x}", result, addr);
-        if mode != AddressMode::Accumulator {
-            self.write(addr, result as u8);
-        } else {
-            self.cpu.reg.a = result as u8;
-        }
+        self.write(addr, result as u8);
 
         // Set flag values
         self.cpu.flags.negative = (result & 0x80) != 0;
@@ -934,15 +928,22 @@ impl ExecutionContext {
         // self.cpu.flags.decimal = result & 0x08;
         // self.cpu.flags.overflow = result & 0x40;
     }
+    fn rora(&mut self) {
+        let result = self.cpu.reg.a >> 1 & 0xfe;
+        self.cpu.reg.a = result as u8;
+        // Set flag values
+        self.cpu.flags.negative = (result & 0x80) != 0;
+        self.cpu.flags.zero = (result & 0xff) == 0;
+        self.cpu.flags.carry = (result & 0x01) != 0;
+        self.adv_pc(1);
+        self.adv_cycles(2);
+
+
+    }
     fn ror(&mut self, mode: AddressMode) {
         let mut pc = self.cpu.reg.pc;
 
         let mut src: u16 = match mode {
-            AddressMode::Accumulator => {
-                self.adv_cycles(2);
-                self.adv_pc(1);
-                self.cpu.reg.a as u16
-            }
             AddressMode::ZeroPage => {
                 self.adv_cycles(5);
                 self.adv_pc(2);
@@ -971,17 +972,10 @@ impl ExecutionContext {
         // Rotate Right instruction
         // Original bit is shifted into carry slot & carry is shifted into bit 7.
         let result = src >> 1 & 0xfe;
-
         // The program counter is already modified by this point by the above `match`.
         let addr = self.cpu.reg.pc;
-
-        // Write result to memory address or accumulator
-        println!("Writing :{:04x} to address:{:04x}", result, addr);
-        if mode != AddressMode::Accumulator {
-            self.write(addr, result as u8);
-        } else {
-            self.cpu.reg.a = result as u8;
-        }
+        // Write result to memory address
+        self.write(addr, result as u8);
 
         // Set flag values
         self.cpu.flags.negative = (result & 0x80) != 0;
@@ -1048,7 +1042,6 @@ impl ExecutionContext {
 
         // TODO set cycle & program counter lengths
         match mode {
-            AddressMode::Accumulator => {},
             AddressMode::ZeroPage => {},
             AddressMode::ZeroPageX => {},
             AddressMode::ZeroPageY => {},
@@ -1061,18 +1054,19 @@ impl ExecutionContext {
             AddressMode::IndirectY => {},
         }
     }
+    // SLO Accumulator
+    fn sloa(&mut self) {
+        let value = self.read(self.cpu.reg.pc + 1) << 1;
+        self.cpu.reg.a |= value;
+        self.cpu.flags.carry = value & 0x80 != 0;
+        self.cpu.flags.zero = value & 0xff == 0;
+        self.adv_pc(1);
+        self.adv_cycles(2);
+    }
     // Shift left one bit in memory, then OR the result with the accumulator
     // Part of undocumented opcodes
     fn slo(&mut self, mode: AddressMode) {
         match mode {
-            AddressMode::Accumulator => {
-                let value = self.read(self.cpu.reg.pc + 1) << 1;
-                self.cpu.reg.a |= value;
-                self.cpu.flags.carry = value & 0x80 != 0;
-                self.cpu.flags.zero = value & 0xff == 0;
-                self.adv_pc(1);
-                self.adv_cycles(2);
-            },
             AddressMode::ZeroPage => {
                 let value = self.read_word(self.cpu.reg.pc + 1) << 1 & 0xff;
                 self.cpu.reg.a |= value as u8;
