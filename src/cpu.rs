@@ -242,10 +242,13 @@ impl ExecutionContext {
             0x98 => self.tya(),
             0x9a => self.txs(),
             0x9d => self.sta(AddressMode::AbsoluteX),
+            0xc0 => self.cpy(AddressMode::Immediate),
             0xc3 => self.dcp(),
+            0xc4 => self.cpy(AddressMode::ZeroPage),
             0xc6 => self.dec(AddressMode::ZeroPage),
             0xc9 => self.cmp(AddressMode::Immediate),
             0xce => self.dec(AddressMode::Absolute),
+            0xcc => self.cpy(AddressMode::Absolute),
             0xd0 => self.bne(),
             0xd2 => self.hlt(),
             0xd3 => self.dcp(),
@@ -257,7 +260,7 @@ impl ExecutionContext {
             0xe6 => self.inc(AddressMode::ZeroPage),
             0xe8 => self.inx(),
             0xea => self.nop(),
-            0xec => self.cpx(),
+            0xec => self.cpx(AddressMode::Absolute),
             0xc8 => self.iny(),
             0xf0 => self.beq(),
             0xf6 => self.inc(AddressMode::ZeroPage),
@@ -470,7 +473,6 @@ impl ExecutionContext {
             // Print possible branch offsets
             let offset = self.read(self.cpu.reg.pc + 1) as i16;
             self.cpu.reg.pc += offset as u16;
-            // self.adv_pc(2);
             self.adv_cycles(3);
         } else {
             self.adv_cycles(2)}
@@ -574,38 +576,90 @@ impl ExecutionContext {
         self.cpu.flags.zero = (result & 0xff) == 0;
         self.cpu.flags.carry = (result & 0x01) != 0;
     }
-
-    // TODO
-    fn cpm(&mut self) {
-        unimplemented!();
-    }
-    // TODO
-    fn cpx(&mut self) {
-        unimplemented!();
-    }
-    fn dec(&mut self, mode: AddressMode) {
-        // TODO Addressing modes
-        match mode {
-            AddressMode::ZeroPage => {},
-            AddressMode::ZeroPageX => {},
-            AddressMode::ZeroPageY => {},
-            AddressMode::Immediate => {},
+    fn cpx(&mut self, mode: AddressMode) {
+        let pc = self.cpu.reg.pc;
+        let x = self.cpu.reg.x as u16;
+        let result: u16 = match mode {
+            AddressMode::ZeroPage => {
+                self.adv_pc(2);
+                self.adv_cycles(2);
+                x - self.read_word(pc + 1) & 0xff
+            },
+            AddressMode::Immediate => {
+                self.adv_pc(2);
+                self.adv_cycles(3);
+                x - self.read(pc + 1) as u16
+            },
             AddressMode::Absolute => {
-                let mut data = self.read_word(self.cpu.reg.pc);
-                data -= 1;
-                self.cpu.flags.zero = (data & 0xff) == 0;
-                self.cpu.flags.negative = (data & 0x80) != 0;
+                self.adv_pc(3);
+                self.adv_cycles(4);
+                x - self.read_word(pc + 1)
+            }
+            _ => unimplemented!("CPX with address mode {:?} is not supported", mode)
+        };
+        self.cpu.flags.negative = (result & 0x80) != 0;
+        self.cpu.flags.zero = (result & 0xff) == 0;
+        self.cpu.flags.carry = (result & 0x01) != 0;
+    }
+    fn cpy(&mut self, mode: AddressMode) {
+        let pc = self.cpu.reg.pc;
+        let y = self.cpu.reg.y as u16;
+        let result: u16 = match mode {
+            AddressMode::ZeroPage => {
+                self.adv_pc(2);
+                self.adv_cycles(2);
+                y - self.read_word(pc + 1) & 0xff
+            },
+            AddressMode::Immediate => {
+                self.adv_pc(2);
+                self.adv_cycles(3);
+                y - self.read(pc + 1) as u16
+            },
+            AddressMode::Absolute => {
+                self.adv_pc(3);
+                self.adv_cycles(4);
+                y - self.read_word(pc + 1)
+            }
+            _ => unimplemented!("CPY with address mode {:?} is not supported", mode)
+        };
+        self.cpu.flags.negative = (result & 0x80) != 0;
+        self.cpu.flags.zero = (result & 0xff) == 0;
+        self.cpu.flags.carry = (result & 0x01) != 0;
+    }
+
+    fn dec(&mut self, mode: AddressMode) {
+        let pc = self.cpu.reg.pc;
+
+        let result: u16 = match mode {
+            AddressMode::ZeroPage => {
+                self.adv_pc(2);
+                self.adv_cycles(5);
+                let data = self.read_word(pc + 1) & 0xff;
+                data.wrapping_sub(1)
+            },
+            AddressMode::ZeroPageX => {
+                self.adv_pc(2);
+                self.adv_cycles(6);
+                let mut data = self.read_word(pc + 1) & 0xff + self.cpu.reg.x as u16;
+                data.wrapping_sub(1)
+
+            },
+            AddressMode::Absolute => {
                 self.adv_cycles(6);
                 self.adv_pc(3);
+                let mut data = self.read_word(pc);
+                data.wrapping_sub(1)
             },
-            AddressMode::AbsoluteX => {},
-            AddressMode::AbsoluteY => {},
-            AddressMode::Indirect => {},
-            AddressMode::IndirectX => {},
-            AddressMode::IndirectY => {},
+            AddressMode::AbsoluteX => {
+                self.adv_cycles(3);
+                self.adv_pc(7);
+                let mut data = self.read_word(self.cpu.reg.pc + 1) + self.cpu.reg.x as u16;
+                data.wrapping_sub(1)
+            },
+            _ => unimplemented!("DEC {:?} is invalid", mode)
         };
-
-
+        self.cpu.flags.negative = (result & 0x80) != 0;
+        self.cpu.flags.zero = (result & 0xff) == 0;
     }
     // Decrement & compare
     fn dcp(&mut self) {
