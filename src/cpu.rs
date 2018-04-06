@@ -510,37 +510,69 @@ impl ExecutionContext {
         self.adv_pc(1);
         self.adv_cycles(2);
     }
+    // Compare with accumulator
     fn cmp(&mut self, mode: AddressMode) {
-        match mode {
-            AddressMode::ZeroPage => {},
-            AddressMode::ZeroPageX => {},
-            AddressMode::ZeroPageY => {},
-            AddressMode::Immediate => {
-                let value = self.read(self.cpu.reg.pc + 1);
-                let result = self.cpu.reg.a - value;
+        let pc = self.cpu.reg.pc;
+        let a = self.cpu.reg.a as u16;
 
-                self.cpu.flags.negative = (result & 0x80) != 0;
-                self.cpu.flags.zero = (result & 0xff) == 0;
-                self.cpu.flags.carry = (result & 0x01) != 0;
-                self.adv_cycles(2);
+        // TODO Handle page boundary cycles for ABS X, Y & Indirect X & Y addressing modes
+        // The 6502 groups memory into two 256 byte pages, e.g if accessing memory is spread across
+        // two of these pages, an extra cycle is used to perform this operation.
+
+        let result: u16 = match mode {
+            AddressMode::ZeroPage => {
                 self.adv_pc(2);
+                self.adv_cycles(2);
+                a - self.read_word(pc + 1) & 0xff
             },
-            AddressMode::Absolute => {},
-            AddressMode::AbsoluteX => {},
+            AddressMode::ZeroPageX => {
+                self.adv_pc(2);
+                self.adv_cycles(4);
+                a - self.read_word(pc + 1) & 0xff + self.cpu.reg.x as u16
+            },
+            AddressMode::Immediate => {
+                self.adv_pc(2);
+                self.adv_cycles(2);
+                a - self.read(pc + 1) as u16
+            },
+            AddressMode::Absolute => {
+                self.adv_pc(3);
+                self.adv_cycles(4);
+                a - self.read_word(pc + 1)
+            },
+            AddressMode::AbsoluteX => {
+                self.adv_pc(3);
+                self.adv_cycles(4);
+                let value = self.read(pc + 1).wrapping_add(self.cpu.reg.x) as u16;
+                a - value as u16
+            },
             AddressMode::AbsoluteY => {
-                let value = self.read(self.cpu.reg.pc + 1).wrapping_add(self.cpu.reg.y);
-                let result = self.cpu.reg.a.wrapping_sub(value);
-
-                self.cpu.flags.negative = (result & 0x80) != 0;
-                self.cpu.flags.zero = (result & 0xff) == 0;
-                self.cpu.flags.carry = (result & 0x01) != 0;
                 self.adv_cycles(4);
                 self.adv_pc(3);
+                let value = self.read(pc + 1).wrapping_add(self.cpu.reg.y) as u16;
+                a - value as u16
             },
-            AddressMode::Indirect => {},
-            AddressMode::IndirectX => {},
-            AddressMode::IndirectY => {},
-        }
+            AddressMode::IndirectX => {
+                self.adv_cycles(6);
+                self.adv_pc(2);
+                let data = self.read(pc + 2) + self.cpu.reg.x & 0xff;
+                let addr = (self.read(data as u16) as u16 | self.read(data as u16 + 1) as u16) << 8;
+                let value = self.read(addr as u16) & 0xff;
+                a - value as u16
+            },
+            AddressMode::IndirectY => {
+                self.adv_cycles(5);
+                self.adv_pc(2);
+                let data = self.read(pc + 2) + self.cpu.reg.y & 0xff;
+                let addr = (self.read(data as u16) as u16 | self.read(data as u16 + 1) as u16) << 8;
+                let value = self.read(addr as u16) & 0xff;
+                a - value as u16
+            }
+            _ => unimplemented!()
+        };
+        self.cpu.flags.negative = (result & 0x80) != 0;
+        self.cpu.flags.zero = (result & 0xff) == 0;
+        self.cpu.flags.carry = (result & 0x01) != 0;
     }
 
     // TODO
