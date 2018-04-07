@@ -387,11 +387,8 @@ impl ExecutionContext {
         // Shift data left by one and write it back to memory
         self.write(addr as u16, value << 1);
         self.cpu.flags.carry =  value >> 1 & 0xfe != 0;
-        self.cpu.flags.negative;
-        self.cpu.flags.zero;
-        // self.cpu.flags.carry = (value & 0x80) != 0;
-        self.adv_pc(2);
-        self.adv_cycles(6);
+        self.cpu.flags.negative = (value & 0x80) != 0;
+        self.cpu.flags.zero = (value & 0xff) == 0;
     }
 
     // TODO Handle page boundary crossing
@@ -1637,57 +1634,46 @@ impl ExecutionContext {
         self.adv_cycles(4);
     }
     // Increment Memory
-    // TODO fix cycles & length
     fn inc(&mut self, mode: AddressMode) {
-        match mode {
+        let pc = self.cpu.reg.pc;
+
+        let result = match mode {
             AddressMode::ZeroPage => {
-                // Opcode e6
-                // Mask the upper two bytes
-                let value = self.read(self.cpu.reg.pc + 1) as u16 & 0xff;
+                let value = self.read(pc + 1) as u16 & 0xff;
                 let addr = self.read_word(value) as u8;
-                self.cpu.flags.zero = (value & 0xff) == 0;
-                self.cpu.flags.negative = (value & 0x80) != 0;
                 self.write(value, addr);
                 self.adv_cycles(5);
                 self.adv_pc(2);
+                value as u16
             },
             AddressMode::ZeroPageX => {
-                let value = self.read(self.cpu.reg.pc + 1) as u16 & 0xff + self.cpu.reg.x as u16;
+                let value = self.read(pc + 1) as u16 & 0xff + self.cpu.reg.x as u16;
                 let addr = self.read_word(value) as u8;
-                self.cpu.flags.zero = (value & 0xff) == 0;
-                self.cpu.flags.negative = (value & 0x80) != 0;
                 self.write(value, addr);
                 self.adv_cycles(5);
                 self.adv_pc(2);
-            },
-            AddressMode::ZeroPageY => {
-                let value = self.read(self.cpu.reg.pc + 1) as u16 & 0xff + self.cpu.reg.y as u16;
-                let addr = self.read_word(value) as u8;
-                self.cpu.flags.zero = (value & 0xff) == 0;
-                self.cpu.flags.negative = (value & 0x80) != 0;
-                self.write(value, addr);
-                self.adv_cycles(5);
-                self.adv_pc(2);
-            },
-            AddressMode::Immediate => {
-                let value = self.read(self.cpu.reg.pc + 1) as u16;
-                let addr = self.read_word(value) as u8;
-                self.cpu.flags.zero = (value & 0xff) == 0;
-                self.cpu.flags.negative = (value & 0x80) != 0;
-                self.write(value, addr);
-                self.adv_cycles(5);
-                self.adv_pc(2);
+                value as u16
             },
             AddressMode::Absolute => {
+                let value = self.read_word(pc + 1);
+                let addr = self.read_word(value) as u8;
+                self.write(value, addr);
+                self.adv_pc(3);
+                self.adv_cycles(6);
+                value as u16
             },
-            AddressMode::AbsoluteX => {},
-            AddressMode::AbsoluteY => {},
-            AddressMode::Indirect => {},
-            AddressMode::IndirectX => {},
-            AddressMode::IndirectY => {},
-            _ => eprintln!("{:?} not covered", mode)
-        }
-
+            AddressMode::AbsoluteX => {
+                let value = self.read_word(pc + 1) + self.cpu.reg.x as u16;
+                let addr = self.read_word(value) as u8;
+                self.write(value, addr);
+                self.adv_pc(3);
+                self.adv_cycles(7);
+                value as u16
+            }
+            _ => unimplemented!("{:?} not supported", mode)
+        };
+        self.cpu.flags.carry = result & 0x80 != 0;
+        self.cpu.flags.zero = result & 0xff == 0;
     }
     // Increment X (implied mode)
     fn inx(&mut self) {
