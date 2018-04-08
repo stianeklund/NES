@@ -10,7 +10,7 @@ impl MemoryMapper for ExecutionContext {
         match addr {
             // See https://wiki.nesdev.com/w/index.php/CPU_memory_map
             0...0x07ff => self.ram.memory[addr as usize] as u8,
-            0x2000 ... 0x3fff => self.ppu.vram[addr as usize & 0x2efff],
+            0x2000 ... 0x3fff => self.ppu.read_handler(addr), // self.ppu.vram[addr as usize & 0x2efff],
             // $6000-$7FFF = Battery Backed Save or Work RAM
             0x6000 ... 0x7fff => unimplemented!("Attempting to read from SRAM address {:04x}", addr),
             0x8000...0xffff => {
@@ -37,7 +37,7 @@ impl MemoryMapper for ExecutionContext {
             // but it can be partly or fully remapped to RAM on the cartridge,
             // allowing up to 4 simultaneous nametables.
 
-            0x2000 ... 0x3fff => self.ppu.handler(addr, byte), //self.ppu.vram[addr as usize & 0x2efff] = byte,
+            0x2000 ... 0x3fff => self.ppu.write_handler(addr, byte), //self.ppu.vram[addr as usize & 0x2efff] = byte,
             0x4000 ... 0x4017 => unimplemented!("Trying to write: {:04x} in NES APU & I/O space", addr),
             0x6000 ... 0x7fff => unimplemented!("Attempting to write to SRAM address {:04x}", addr),
             0x8000...0xffff => self.cart.prg[addr as usize & 0x3fff] = byte,
@@ -182,6 +182,7 @@ impl ExecutionContext {
             0x18 => self.clc(),
             0x1b => self.slo(AddressMode::AbsoluteY),
             0x1f => self.slo(AddressMode::AbsoluteX),
+            0x0c => self.nop(),
             0x0e => self.asl(AddressMode::Absolute),
             0x0a => self.asla(),
             0xa0 => self.ldy(AddressMode::Immediate),
@@ -205,6 +206,7 @@ impl ExecutionContext {
             0xba => self.tsx(),
             0xbd => self.lda(AddressMode::AbsoluteX),
             0xbe => self.ldx(AddressMode::AbsoluteY),
+            0xc0 => self.cpy(AddressMode::Immediate),
             0x40 => self.rti(),
             0x41 => self.eor(AddressMode::IndirectX),
             0x4a => self.lsra(),
@@ -224,9 +226,10 @@ impl ExecutionContext {
             0x2d => self.and(AddressMode::Absolute),
             0x30 => self.bmi(),
             0x35 => self.and(AddressMode::ZeroPageX),
+            0x36 => self.rol(AddressMode::ZeroPageX),
             0x38 => self.sec(),
             0x3e => self.rol(AddressMode::AbsoluteX),
-            0x4c => self.jmp(),
+            0x4c => self.jmp(AddressMode::Absolute),
             0x50 => self.bvs(),
             0x51 => self.eor(AddressMode::IndirectY),
             0x55 => self.eor(AddressMode::ZeroPageX),
@@ -240,7 +243,7 @@ impl ExecutionContext {
             0x66 => self.ror(AddressMode::ZeroPage),
             0x68 => self.pla(),
             0x6a => self.rora(),
-            0x6c => self.jmp(),
+            0x6c => self.jmp(AddressMode::Indirect),
             0x6d => self.adc(AddressMode::Absolute),
             0x69 => self.adc(AddressMode::Immediate),
             0x6e => self.ror(AddressMode::Absolute),
@@ -278,15 +281,22 @@ impl ExecutionContext {
             0xd9 => self.cmp(AddressMode::AbsoluteY),
             0xde => self.dec(AddressMode::AbsoluteX),
             0xdf => self.dcp(),
+            0xe1 => self.sbc(AddressMode::IndirectX),
+            0xe5 => self.sbc(AddressMode::ZeroPage),
             0xe6 => self.inc(AddressMode::ZeroPage),
             0xe8 => self.inx(),
+            0xe9 => self.sbc(AddressMode::Immediate),
             0xea => self.nop(),
             0xec => self.cpx(AddressMode::Absolute),
+            0xed => self.sbc(AddressMode::Absolute),
             0xc8 => self.iny(),
             0xf0 => self.beq(),
+            0xf1 => self.sbc(AddressMode::IndirectY),
+            0xf5 => self.sbc(AddressMode::ZeroPageX),
             0xf6 => self.inc(AddressMode::ZeroPage),
             0xf7 => self.isc(AddressMode::ZeroPageX),
             0xf8 => self.sed(),
+            0xfd => self.sbc(AddressMode::AbsoluteX),
             0xff => self.isc(AddressMode::AbsoluteX),
             0x1e => self.asl(AddressMode::AbsoluteX),
             _ => eprintln!("Decoding opcode not implemented"),
@@ -1319,14 +1329,13 @@ impl ExecutionContext {
         // self.cpu.flags.overflow = result & 0x40;
     }
     fn rts(&mut self) {
-        let low = self.read(self.cpu.reg.sp as u16);
-        let high = self.read(self.cpu.reg.sp.wrapping_add(1) as u16);
-        let ret: u16 = (high as u16) << 8 | (low as u16);
+        self.pull_byte(self.cpu.reg.sp);
+        let value = self.cpu.reg.sp as u16;
+
         // Set program counter for debug output
         self.cpu.reg.prev_pc = self.cpu.reg.pc;
-        self.cpu.reg.pc = ret as u16;
-        self.cpu.reg.sp = self.cpu.reg.sp.wrapping_add(2);
-
+        self.cpu.reg.pc = ((value << 8) - 1) as u16;
+        // self.cpu.reg.sp = sp.wrapping_add(2) as u8;
         self.adv_pc(1);
         self.adv_cycles(6);
     }
@@ -1353,17 +1362,62 @@ impl ExecutionContext {
     }
 
     fn sbc(&mut self, mode: AddressMode) {
-        let mem = self.read(self.cpu.reg.pc) as u16;
+        let pc = self.cpu.reg.pc;
+        let value = match mode {
+            AddressMode::ZeroPage => {
+                self.adv_cycles(3);
+                self.adv_pc(2);
+                let data = self.read(pc + 1) & 0xff;
+                data as u16
+            },
+            AddressMode::ZeroPageX => {
+                self.adv_cycles(3);
+                self.adv_pc(2);
+                let data = self.read(pc + 1) & 0xff + self.cpu.reg.x;
+                data as u16
+            },
+            AddressMode::Immediate => {
+                self.adv_pc(2);
+                self.adv_cycles(2);
+                let data = self.read(pc + 1);
+                data as u16
+            },
+            AddressMode::Absolute => {
+                self.adv_pc(3);
+                self.adv_cycles(4);
+                self.read_word(pc + 1)
+            },
+            AddressMode::AbsoluteX => {
+                let data = self.read_word(pc + 1) + self.cpu.reg.x as u16;
+                self.adv_cycles(4);
+                self.adv_pc(3);
+                data
+            },
+            AddressMode::AbsoluteY => {
+                let data = self.read_word(pc + 1) + self.cpu.reg.x as u16;
+                self.adv_cycles(4);
+                self.adv_pc(3);
+                data
+            },
+            AddressMode::IndirectX => {
+                let value = pc + 1;
+                let data = self.read(value) << 1 + self.cpu.reg.x as u16;
+                self.adv_pc(2);
+                self.adv_cycles(6);
+                data as u16
+            }
+            AddressMode::IndirectY => {
+                let value = pc + 1;
+                let data = self.read(value) << 1 + self.cpu.reg.y as u16;
+                self.adv_pc(2);
+                self.adv_cycles(6);
+                data as u16
+            }
+            _ => unimplemented!()
+        };
         // XOR memory value with 255 to set if result is 0 to 255, or clear if less than 0.
         let a = self.cpu.reg.a as u16;
-
-        // let result = (a).wrapping_add(mem ^ 0xff).wrapping_add(self.cpu.flags.carry as u16);
-
-        // Check for overflow
-        // overflowing_add(self, rhs: u16) -> (u16, bool)
-        // let overflow = a.overflowing_add(mem ^ 0xffu16.wrapping_add(self.cpu.flags.carry as u16));
-
-        let (result, overflow) = a.overflowing_add(mem ^ 0xffu16.wrapping_add(self.cpu.flags.carry as u16));
+        let (result, overflow) = a.overflowing_add(value ^ 0xffu16.wrapping_add(self.cpu.flags.carry as u16));
         self.cpu.flags.overflow = overflow;
 
         self.cpu.reg.a = result as u8;
@@ -1371,20 +1425,6 @@ impl ExecutionContext {
         self.cpu.flags.carry = (self.cpu.reg.a & 0x01) != 0;
         self.cpu.flags.negative = (self.cpu.reg.a & 0x80) != 0;
         self.cpu.flags.zero = (self.cpu.reg.a & 0xff) == 0;
-
-        // TODO set cycle & program counter lengths
-        match mode {
-            AddressMode::ZeroPage => {},
-            AddressMode::ZeroPageX => {},
-            AddressMode::ZeroPageY => {},
-            AddressMode::Immediate => { self.adv_pc(2); self.adv_cycles(2); },
-            AddressMode::Absolute => { self.adv_pc(3); self.adv_cycles(4); },
-            AddressMode::AbsoluteX => {},
-            AddressMode::AbsoluteY => {},
-            AddressMode::Indirect => {},
-            AddressMode::IndirectX => {},
-            AddressMode::IndirectY => {},
-        }
     }
     // SLO Accumulator
     fn sloa(&mut self) {
@@ -1423,10 +1463,6 @@ impl ExecutionContext {
                 self.adv_pc(2);
                 self.adv_cycles(6);
             },
-            AddressMode::Immediate => {
-                // Immediate addressing mode not used for this instruction?
-                unreachable!("Immediate addressing not used for SLO");
-            },
             AddressMode::Absolute => {
                 let value = self.read_word(self.cpu.reg.pc + 1) << 1 & 0xff;
                 self.cpu.reg.a |= value as u8;
@@ -1451,7 +1487,6 @@ impl ExecutionContext {
                 self.adv_pc(3);
                 self.adv_cycles(6);
             },
-            AddressMode::Indirect => {},
             AddressMode::IndirectX => {
                 let value = self.cpu.reg.pc + 1;
                 let result = self.read(value) << 1 + self.cpu.reg.x as u16;
@@ -1469,7 +1504,8 @@ impl ExecutionContext {
                 self.cpu.flags.zero = value & 0xff == 0;
                 self.adv_pc(2);
                 self.adv_cycles(8);
-            },
+            }
+            _ => unimplemented!()
         };
 
     }
@@ -1765,12 +1801,14 @@ impl ExecutionContext {
         self.adv_cycles(3); // 6 if no jump?
         self.cpu.reg.pc = addr;
     }
-    fn jmp(&mut self) {
-        // let pc = self.cpu.reg.pc + 1;
-        // let addr = self.read_word(pc);
+    fn jmp(&mut self, mode: AddressMode) {
+        match mode {
+            AddressMode::Indirect => self.adv_cycles(5),
+            AddressMode::Absolute => self.adv_cycles(3),
+            _ => unimplemented!()
+        }
         self.cpu.reg.prev_pc = self.cpu.reg.pc;
         self.cpu.reg.pc = self.read_word(self.cpu.reg.pc + 1);
-        self.adv_cycles(3);
     }
     fn sec(&mut self) {
         self.cpu.flags.carry = true;

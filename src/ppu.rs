@@ -82,7 +82,15 @@ impl Ppu {
             reg: Registers::default(),
         }
     }
-    pub fn handler(&mut self, addr: u16, byte: u8) {
+    pub fn read_handler(&self, addr: u16) -> u8 {
+        match addr {
+            0x2000 => self.reg.ppu_ctrl,
+            0x2001 => self.reg.ppu_mask,
+            0x2007 => self.reg.ppu_data,
+            _ => unimplemented!()
+        }
+    }
+    pub fn write_handler(&mut self, addr: u16, byte: u8) {
         match addr {
            0x2000 => self.reg.ppu_ctrl_write(byte),
            0x2001 => self.reg.ppu_mask_write(byte),
