@@ -189,20 +189,24 @@ impl ExecutionContext {
             0x0a => self.asla(),
             0xa0 => self.ldy(AddressMode::Immediate),
             0xa1 => self.lda(AddressMode::IndirectX),
-            0xa2 => self.lda(AddressMode::Immediate),
+            0xa2 => self.ldx(AddressMode::Immediate),
             0xa4 => self.ldy(AddressMode::ZeroPage),
             0xa5 => self.lda(AddressMode::ZeroPage),
+            0xa6 => self.ldx(AddressMode::ZeroPage),
             0xa8 => self.tay(),
             0xa9 => self.lda(AddressMode::Immediate),
             0xaa => self.tax(),
             0xad => self.lda(AddressMode::Absolute),
+            0xae => self.ldx(AddressMode::Absolute),
             0xaf => self.lax(AddressMode::Absolute),
             0xb0 => self.bcs(),
             0xb1 => self.lda(AddressMode::IndirectY),
             0xb5 => self.lda(AddressMode::ZeroPageX),
+            0xb6 => self.ldx(AddressMode::ZeroPageY),
             0xb8 => self.clv(),
             0xb9 => self.lda(AddressMode::AbsoluteY),
             0xbd => self.lda(AddressMode::AbsoluteX),
+            0xbe => self.ldx(AddressMode::AbsoluteY),
             0x40 => self.rti(),
             0x41 => self.eor(AddressMode::IndirectX),
             0x4a => self.lsr(),
@@ -453,8 +457,9 @@ impl ExecutionContext {
     // Branch if Carry Set
     fn bcs(&mut self) {
         if self.cpu.flags.carry {
-            let offset = self.read(self.cpu.reg.pc + 1);
-            self.cpu.reg.pc += offset as u16;
+            let offset = self.read(self.cpu.reg.pc + 1) as i16;
+            self.cpu.reg.prev_pc = self.cpu.reg.pc;
+            self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(((offset ^ 0x80) - 0x80) as u16);
             self.adv_cycles(1);
         } else {
             self.adv_pc(2);
@@ -463,8 +468,9 @@ impl ExecutionContext {
     }
     fn bcc(&mut self) {
         if !self.cpu.flags.carry {
-            let offset = self.read(self.cpu.reg.pc + 1);
-            self.cpu.reg.pc += offset as u16;
+            let offset = self.read(self.cpu.reg.pc + 1) as i16;
+            self.cpu.reg.prev_pc = self.cpu.reg.pc;
+            self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(((offset ^ 0x80) - 0x80) as u16);
             self.adv_cycles(1);
         } else {
             self.adv_pc(2);
@@ -474,9 +480,9 @@ impl ExecutionContext {
     // Branch on Equal
     fn beq(&mut self) {
         if self.cpu.flags.zero {
-            let offset = self.read(self.cpu.reg.pc + 2);
-            println!("Branching");
-            self.cpu.reg.pc = (self.cpu.reg.pc as i16 + offset as i16) as u16;
+            let offset = self.read(self.cpu.reg.pc + 1) as i16;
+            self.cpu.reg.prev_pc = self.cpu.reg.pc;
+            self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(((offset ^ 0x80) - 0x80) as u16);
             self.adv_cycles(1);
         } else {
             self.adv_pc(2);
@@ -489,8 +495,9 @@ impl ExecutionContext {
         // 2 cycles (+ 1 if branch succeeds, +2 if to a new page)
         // This is for all branch instructions
         if !self.cpu.flags.negative {
-            let offset = self.read(self.cpu.reg.pc + 1);
-            self.cpu.reg.pc += offset as u16;
+            let offset = self.read(self.cpu.reg.pc + 1) as i16;
+            self.cpu.reg.prev_pc = self.cpu.reg.pc;
+            self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(((offset ^ 0x80) - 0x80) as u16);
             self.adv_cycles(1);
         } else {
             self.adv_pc(2);
@@ -501,8 +508,9 @@ impl ExecutionContext {
     fn bpl(&mut self) {
         // Cycles 3+ / 2
         if !self.cpu.flags.negative {
-            let offset = self.read(self.cpu.reg.pc + 1);
-            self.cpu.reg.pc += offset as u16;
+            let offset = self.read(self.cpu.reg.pc + 1) as i16;
+            self.cpu.reg.prev_pc = self.cpu.reg.pc;
+            self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(((offset ^ 0x80) - 0x80) as u16);
             self.adv_cycles(3);
         } else {
             println!("Not branching");
@@ -547,9 +555,9 @@ impl ExecutionContext {
     fn bne(&mut self) {
         // If zero flag is 0 branch
         if !self.cpu.flags.zero {
-            // Print possible branch offsets
             let offset = self.read(self.cpu.reg.pc + 1) as i16;
-            self.cpu.reg.pc += offset as u16;
+            self.cpu.reg.prev_pc = self.cpu.reg.pc;
+            self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(((offset ^ 0x80) - 0x80) as u16);
             self.adv_cycles(3);
         } else {
             self.adv_cycles(2)}
@@ -558,7 +566,9 @@ impl ExecutionContext {
     // Branch on overflow set
     fn bvs(&mut self) {
         if self.cpu.flags.overflow {
-            self.adv_pc(2);
+            let offset = self.read(self.cpu.reg.pc + 1) as i16;
+            self.cpu.reg.prev_pc = self.cpu.reg.pc;
+            self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(((offset ^ 0x80) - 0x80) as u16);
             self.adv_cycles(3);
         } else {
             self.adv_cycles(2);
@@ -1427,30 +1437,37 @@ impl ExecutionContext {
     }
     fn sta(&mut self, mode: AddressMode) {
         // Ex: Absolute: STA $4400 Hex: $8D Len: 3 Cycles:4
+        let pc = self.cpu.reg.pc;
+        let a = self.cpu.reg.a;
         match mode {
             AddressMode::Absolute => {
-                let addr = self.read_word(self.cpu.reg.pc + 1);
+                let addr = self.read_word(pc + 1);
                 // Write value of accumulator to memory address
-                self.write(addr, self.cpu.reg.a);
+                self.write(addr, a);
                 self.adv_cycles(4);
                 self.adv_pc(3);
             },
             AddressMode::AbsoluteX => {
-                let addr = self.read_word(self.cpu.reg.pc + 1) + self.cpu.reg.x as u16;
-                self.write(addr, self.cpu.reg.a);
-                self.adv_cycles(4);
+                let addr = self.read_word(pc + 1) + self.cpu.reg.x as u16;
+                self.write(addr, a);
+                self.adv_cycles(5);
                 self.adv_pc(3);
             },
+            AddressMode::IndirectX => {
+                let addr = self.read_word(pc + 1) + self.cpu.reg.x as u16;
+                self.write(addr, a);
+                self.adv_cycles(6);
+                self.adv_pc(2);
+            },
             AddressMode::IndirectY => {
-                let value = self.cpu.reg.pc + 1;
-                let addr = self.read_word(value) + self.cpu.reg.y as u16;
-                self.write(addr, self.cpu.reg.a);
-                self.adv_cycles(4);
+                let addr = self.read_word(pc + 1) + self.cpu.reg.y as u16;
+                self.write(addr, a);
+                self.adv_cycles(6);
                 self.adv_pc(2);
             },
             AddressMode::ZeroPage => {
                 // Mask the upper two bytes
-                let addr = self.read_word(self.cpu.reg.pc + 1) & 0xff;
+                let addr = self.read_word(pc + 1) & 0xff;
                 // Write value of accumulator to memory address
                 self.write(addr, self.cpu.reg.a);
                 self.adv_cycles(3);
@@ -1458,7 +1475,7 @@ impl ExecutionContext {
             }
             AddressMode::ZeroPageX => {
                 // Mask the upper two bytes
-                let addr = self.read_word(self.cpu.reg.pc + 1) & 0xff + self.cpu.reg.x as u16;
+                let addr = self.read_word(pc + 1) & 0xff + self.cpu.reg.x as u16;
                 // Write value of accumulator to memory address
                 self.write(addr, self.cpu.reg.a);
                 self.adv_cycles(4);
@@ -1694,6 +1711,7 @@ impl ExecutionContext {
     }
     // Jump to Subroutine
     fn jsr(&mut self) {
+        self.cpu.reg.prev_pc = self.cpu.reg.pc;
         let addr = self.read_word(self.cpu.reg.pc + 1);
         self.adv_pc(3);
 
