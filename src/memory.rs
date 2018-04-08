@@ -8,7 +8,8 @@ use rom::{Cartridge, RomHeader};
 
 
 pub struct Ram {
-    pub memory: Box<[u8; 0x800]>
+    pub memory: Box<[u8; 0x800]>,
+    pub sram: Box<[u8; 0x8000]>
 }
 
 
@@ -40,6 +41,7 @@ impl Ram {
     pub fn default() -> Self {
         Ram {
             memory: Box::new([0; 0x0800]),
+            sram: Box::new([0; 0x08000]),
         }
     }
 }

@@ -12,7 +12,7 @@ impl MemoryMapper for ExecutionContext {
             0...0x07ff => self.ram.memory[addr as usize] as u8,
             0x2000 ... 0x3fff => self.ppu.read_handler(addr), // self.ppu.vram[addr as usize & 0x2efff],
             // $6000-$7FFF = Battery Backed Save or Work RAM
-            0x6000 ... 0x7fff => unimplemented!("Attempting to read from SRAM address {:04x}", addr),
+            0x6000 ... 0x7fff => self.ram.sram[addr as usize] as u8,
             0x8000...0xffff => {
                 let mut mask_amount = 0;
                 if self.cart.header.prg_rom_size == 1 {
@@ -39,11 +39,21 @@ impl MemoryMapper for ExecutionContext {
 
             0x2000 ... 0x3fff => self.ppu.write_handler(addr, byte), //self.ppu.vram[addr as usize & 0x2efff] = byte,
             0x4000 ... 0x4017 => unimplemented!("Trying to write: {:04x} in NES APU & I/O space", addr),
-            0x6000 ... 0x7fff => unimplemented!("Attempting to write to SRAM address {:04x}", addr),
+            0x6000 ... 0x7fff => {
+                // Many CPU tests just store ASCII characters in SRAM
+                // Output as characters when writing to SRAM
+                self.ram.sram[addr as usize] = byte;
+                // TODO Remove hack
+                let output = self.ram.sram[addr as usize];
+                if output.is_ascii() {
+                    println!("{}", output as char);
+                }
+            },
             0x8000...0xffff => self.cart.prg[addr as usize & 0x3fff] = byte,
             _ => eprintln!("Trying to write to memory address {:04x}", addr),
         };
-        println!("Writing {:04x} to ${:04x}", byte, addr);
+
+
     }
 }
 
@@ -1033,28 +1043,28 @@ impl ExecutionContext {
         let result: u16 = match mode {
             AddressMode::Absolute => {
                 // LDA A16
-                let data = self.read_word(self.cpu.reg.pc + 1);
+                let data = self.read_word(pc + 1);
                 self.cpu.reg.a = data as u8;
                 self.adv_cycles(4);
                 self.adv_pc(3);
                 data
             },
             AddressMode::AbsoluteX => {
-                let data = self.read_word(self.cpu.reg.pc + 1) + self.cpu.reg.x as u16;
+                let data = self.read_word(pc + 1) + self.cpu.reg.x as u16;
                 self.cpu.reg.a = data as u8;
                 self.adv_cycles(4);
                 self.adv_pc(3);
                 data
             },
             AddressMode::AbsoluteY => {
-                let data = self.read_word(self.cpu.reg.pc + 1) + self.cpu.reg.y as u16;
+                let data = self.read_word(pc + 1) + self.cpu.reg.y as u16;
                 self.cpu.reg.a = data as u8;
                 self.adv_cycles(4);
                 self.adv_pc(3);
                 data
             }
             AddressMode::IndirectX => {
-                let data = (self.read(self.cpu.reg.pc + 2) as u16) + (self.cpu.reg.x & 0xff) as u16;
+                let data = (self.read(pc + 1) as u16) + (self.cpu.reg.x & 0xff) as u16;
                 let addr = (self.read(data) as u16 | self.read(data + 1) as u16) << 8;
                 let value = self.read(addr as u16) & 0xff;
                 self.adv_cycles(6);
@@ -1063,7 +1073,7 @@ impl ExecutionContext {
             }
             AddressMode::IndirectY => {
                 // Indirect is 3 bytes
-                let data = (self.read(self.cpu.reg.pc + 2) as u16) + (self.cpu.reg.y & 0xff) as u16;
+                let data = (self.read(pc + 1) as u16) + (self.cpu.reg.y & 0xff) as u16;
                 let addr = (self.read(data) as u16 | self.read(data + 1) as u16) << 8;
                 let value = self.read(addr as u16) & 0xff;
                 self.adv_cycles(6);
