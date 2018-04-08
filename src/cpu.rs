@@ -10,10 +10,6 @@ impl MemoryMapper for ExecutionContext {
         match addr {
             // See https://wiki.nesdev.com/w/index.php/CPU_memory_map
             0...0x07ff => self.ram.memory[addr as usize] as u8,
-            // PPU addressing is not implemented yet
-            0...0x2007 => unimplemented!("Warning, to read PPU address space, which is not implemented"),
-            // RAM Mirror
-            0x0800...0x1fff => self.ram.memory[addr as usize & 0x07ff],
             0x2000 ... 0x3fff => self.ppu.vram[addr as usize & 0x2efff],
             // $6000-$7FFF = Battery Backed Save or Work RAM
             0x6000 ... 0x7fff => unimplemented!("Attempting to read from SRAM address {:04x}", addr),
@@ -41,12 +37,13 @@ impl MemoryMapper for ExecutionContext {
             // but it can be partly or fully remapped to RAM on the cartridge,
             // allowing up to 4 simultaneous nametables.
 
-            0x2000 ... 0x3fff => self.ppu.vram[addr as usize & 0x2efff] = byte,
+            0x2000 ... 0x3fff => self.ppu.handler(addr, byte), //self.ppu.vram[addr as usize & 0x2efff] = byte,
             0x4000 ... 0x4017 => unimplemented!("Trying to write: {:04x} in NES APU & I/O space", addr),
             0x6000 ... 0x7fff => unimplemented!("Attempting to write to SRAM address {:04x}", addr),
             0x8000...0xffff => self.cart.prg[addr as usize & 0x3fff] = byte,
             _ => eprintln!("Trying to write to memory address {:04x}", addr),
         };
+        println!("Writing {:04x} to ${:04x}", byte, addr);
     }
 }
 
@@ -54,7 +51,7 @@ impl MemoryMapper for ExecutionContext {
 pub struct StatusRegister {
     negative: bool,
     overflow: bool,
-    bit5: bool,      // always 1
+    bit5: bool,
     brk: bool,
     decimal: bool,
     interrupt: bool,
@@ -162,8 +159,8 @@ impl ExecutionContext {
             ppu: Ppu::default(),
         }
     }
-    fn adv_pc(&mut self, t: u16) { self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(t); }
-    fn adv_cycles(&mut self, t: u16) { self.cpu.cycles = self.cpu.cycles.wrapping_add(t); }
+    fn adv_pc(&mut self, amount: u16) { self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(amount); }
+    fn adv_cycles(&mut self, cycles: u16) { self.cpu.cycles = self.cpu.cycles.wrapping_add(cycles); }
 
     pub fn decode(&mut self) {
         let opcode = self.read(self.cpu.reg.pc);
@@ -205,14 +202,16 @@ impl ExecutionContext {
             0xb6 => self.ldx(AddressMode::ZeroPageY),
             0xb8 => self.clv(),
             0xb9 => self.lda(AddressMode::AbsoluteY),
+            0xba => self.tsx(),
             0xbd => self.lda(AddressMode::AbsoluteX),
             0xbe => self.ldx(AddressMode::AbsoluteY),
             0x40 => self.rti(),
             0x41 => self.eor(AddressMode::IndirectX),
-            0x4a => self.lsr(),
-            0x4e => self.lsr(),
+            0x4a => self.lsra(),
+            0x4e => self.lsr(AddressMode::Absolute),
             0x4d => self.eor(AddressMode::Absolute),
             0x45 => self.eor(AddressMode::ZeroPage),
+            0x46 => self.lsr(AddressMode::ZeroPage),
             0x48 => self.pha(),
             0x49 => self.eor(AddressMode::Immediate),
             0x28 => self.plp(),
@@ -238,15 +237,18 @@ impl ExecutionContext {
             0x61 => self.adc(AddressMode::IndirectX),
             0x64 => self.dop(AddressMode::ZeroPage),
             0x65 => self.adc(AddressMode::ZeroPage),
+            0x66 => self.ror(AddressMode::ZeroPage),
             0x68 => self.pla(),
+            0x6a => self.rora(),
             0x6c => self.jmp(),
             0x6d => self.adc(AddressMode::Absolute),
             0x69 => self.adc(AddressMode::Immediate),
-            0x6e => self.lsr(),
+            0x6e => self.ror(AddressMode::Absolute),
             0x70 => self.bvs(),
             0x72 => self.nop(),
             0x73 => self.nop(),
             0x78 => self.sei(),
+            0x7e => self.ror(AddressMode::AbsoluteX),
             0x84 => self.sty(AddressMode::ZeroPage),
             0x85 => self.sta(AddressMode::ZeroPage),
             0x86 => self.stx(AddressMode::ZeroPage),
@@ -513,7 +515,6 @@ impl ExecutionContext {
             self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(((offset ^ 0x80) - 0x80) as u16);
             self.adv_cycles(3);
         } else {
-            println!("Not branching");
             self.adv_pc(2);
             self.adv_cycles(2);
         }
@@ -751,7 +752,7 @@ impl ExecutionContext {
     }
     // Decrement Y register
     fn dey(&mut self) {
-        self.cpu.reg.y = self.cpu.reg.y - 1;
+        self.cpu.reg.y = self.cpu.reg.y.wrapping_sub(1);
         self.cpu.flags.negative = (self.cpu.reg.y & 0x80) != 0;
         self.cpu.flags.zero = self.cpu.reg.y & 0xff == 0;
         self.adv_cycles(2);
@@ -760,9 +761,9 @@ impl ExecutionContext {
     }
     // Decrement X register
     fn dex(&mut self) {
-        self.cpu.reg.x = self.cpu.reg.x - 1;
-        self.cpu.flags.negative = (self.cpu.reg.y & 0x80) != 0;
-        self.cpu.flags.zero = self.cpu.reg.y & 0xff == 0;
+        self.cpu.reg.x = self.cpu.reg.x.wrapping_sub(1);
+        self.cpu.flags.negative = (self.cpu.reg.x & 0x80) != 0;
+        self.cpu.flags.zero = self.cpu.reg.x & 0xff == 0;
         self.adv_cycles(2);
         self.adv_pc(1);
 
@@ -1091,17 +1092,54 @@ impl ExecutionContext {
         self.cpu.flags.zero = (result & 0xff) == 0;
         self.cpu.flags.negative = (result & 0x80) != 0;
     }
-    // Logical Shift Right
-    // TODO Addressing modes
-    fn lsr(&mut self) {
+    fn lsr(&mut self, mode: AddressMode) {
+        let pc = self.cpu.reg.pc;
+        let addr = match mode {
+            AddressMode::ZeroPage => {
+                let data = self.read(pc + 1) & 0xff;
+                self.adv_cycles(5);
+                self.adv_pc(2);
+                data as u16
+            }
+            AddressMode::ZeroPageX => {
+                let data = self.read(pc + 1) & 0xff + self.cpu.reg.x;
+                self.adv_cycles(6);
+                self.adv_pc(2);
+                data as u16
+            }
+            AddressMode::Absolute => {
+                let data = self.read_word(pc + 1);
+                self.adv_cycles(6);
+                self.adv_pc(3);
+                data
+            }
+            AddressMode::AbsoluteX => {
+                let data = self.read_word(pc + 1) + self.cpu.reg.x as u16;
+                self.adv_cycles(6);
+                self.adv_pc(3);
+                data
+            }
+            _ => unimplemented!("{:?} not implemented", mode)
+        };
+        let value: u8 = self.read(addr as u16);
+       // self.write(addr as u16, value);
+        let result = (value >> 1) | ((self.cpu.flags.carry as u8) << 7);
+        self.write(addr as u16, result);
+        self.cpu.flags.negative = (result & 0x80) != 0;
+        self.cpu.flags.zero = (result & 0xff) == 0;
+        self.cpu.flags.carry = value & 1 != 0;
+    }
+
+    // Logical Shift Right (Accumulator)
+    fn lsra(&mut self) {
         // Flags affected
         let carry = (self.cpu.reg.a & 1) != 0;
         self.cpu.reg.a = (self.cpu.reg.a >> 1) | ((self.cpu.flags.carry as u8) << 7);
-        self.cpu.flags.negative;
-        self.cpu.flags.zero;
+        self.cpu.flags.negative = (self.cpu.reg.a & 0x80) != 0;
+        self.cpu.flags.zero = (self.cpu.reg.a & 0xff) == 0;
         self.cpu.flags.carry = carry;
-        self.adv_pc(3);
-        self.adv_cycles(6);
+        self.adv_pc(1);
+        self.adv_cycles(2);
     }
     fn nop(&mut self) {
         self.adv_pc(1);
@@ -1576,12 +1614,17 @@ impl ExecutionContext {
     }
     // Transfer X to Stack Pointer
     fn txs(&mut self) {
-        // TODO TXS is like POP?
         self.push_byte(self.cpu.reg.x);
+        // self.cpu.reg.sp = self.cpu.reg.x;
         self.adv_pc(1);
         self.adv_cycles(2);
     }
-
+    // Transfer Stack Pointer to X
+    fn tsx(&mut self) {
+        self.cpu.reg.x = self.cpu.reg.sp;
+        self.adv_pc(1);
+        self.adv_cycles(2);
+    }
     fn push_word(&mut self, value: u16) {
         let sp = self.cpu.reg.sp;
         self.write_word(0x100 + (sp.wrapping_sub(1)) as u16, value);

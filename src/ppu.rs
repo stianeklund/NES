@@ -2,7 +2,8 @@ use interconnect::MemoryMapper;
 pub struct Ppu {
     pub chr: Vec<u8>,
     pub vram: Vec<u8>,
-    addr: Vec<u16>
+    pub addr: Vec<u16>,
+    pub reg: Registers,
 }
 pub struct Registers {
     ppu_ctrl: u8,
@@ -15,9 +16,6 @@ pub struct Registers {
     ppu_addr: u8,
     ppu_data: u8,
     oam_dma: u8,
-
-
-
 }
 
 impl Registers {
@@ -60,6 +58,16 @@ impl Registers {
         self.ppu_mask = value >> 7 & 1;
 
     }
+    pub fn ppu_data_write(&mut self, value: u8) {
+        self.ppu_data = value >> 0 & 1;
+        self.ppu_data = value >> 1 & 1;
+        self.ppu_data = value >> 2 & 1;
+        self.ppu_data = value >> 3 & 1;
+        self.ppu_data = value >> 4 & 1;
+        self.ppu_data = value >> 5 & 1;
+        self.ppu_data = value >> 6 & 1;
+        self.ppu_data = value >> 7 & 1;
+    }
 }
 // Internal data bus for CPU communications
 pub struct PpuDataBus {
@@ -71,6 +79,18 @@ impl Ppu {
             chr: vec![0; 0x2000],
             vram: vec![0; 16384],
             addr: vec![0u16],
+            reg: Registers::default(),
+        }
+    }
+    pub fn handler(&mut self, addr: u16, byte: u8) {
+        match addr {
+           0x2000 => self.reg.ppu_ctrl_write(byte),
+           0x2001 => self.reg.ppu_mask_write(byte),
+           0x2007 => {
+               println!("Writng {:04x} to {:04x}", byte, addr);
+               self.reg.ppu_data_write(byte);
+           },
+            _ => unimplemented!("Byte: {:04x} Addr: {:04x}", byte, addr)
         }
     }
 }
