@@ -9,6 +9,7 @@ mod opcode;
 mod memory;
 mod cpu;
 mod ppu;
+mod apu;
 
 use std::path::Path;
 use std::io::{self, Read};
@@ -33,6 +34,7 @@ fn main() {
     // Interconnect could be handling the below instead of `ExecutionContext`
 
     let mut ctx = ExecutionContext::new();
+    ctx.reset();
     ctx.cart.load_rom(&mut f);
 
     // Get word at memory location 0xfffc and set PC value.
@@ -47,7 +49,7 @@ fn main() {
     loop {
         let step: bool = true;
         if step {
-            io::stdin().read_line(&mut String::new()).unwrap();
+            // io::stdin().read_line(&mut String::new()).unwrap();
             ctx.decode();
         }
     }

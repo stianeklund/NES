@@ -4,13 +4,16 @@ use interconnect::MemoryMapper;
 use memory::{Ram};
 use rom::Cartridge;
 use ppu::Ppu;
+use apu::Apu;
 
 impl MemoryMapper for ExecutionContext {
     fn read(&self, addr: u16) -> u8 {
         match addr {
             // See https://wiki.nesdev.com/w/index.php/CPU_memory_map
             0...0x07ff => self.ram.memory[addr as usize] as u8,
+            // TODO Rewrite PPU read method to handle addresses like APU
             0x2000 ... 0x3fff => self.ppu.read_handler(addr), // self.ppu.vram[addr as usize & 0x2efff],
+            0x4000 ... 0x4017 => self.apu.read(addr),
             // $6000-$7FFF = Battery Backed Save or Work RAM
             0x6000 ... 0x7fff => self.ram.sram[addr as usize] as u8,
             0x8000...0xffff => {
@@ -22,7 +25,7 @@ impl MemoryMapper for ExecutionContext {
                 }
                 self.cart.prg[addr as usize & mask_amount]
             },
-            _ => panic!("Unrecognized addr: {:04x}", addr)
+            _ => unimplemented!("Reads to {:04x} is not implemented", addr),
         }
 
     }
@@ -37,8 +40,8 @@ impl MemoryMapper for ExecutionContext {
             // but it can be partly or fully remapped to RAM on the cartridge,
             // allowing up to 4 simultaneous nametables.
 
-            0x2000 ... 0x3fff => self.ppu.write_handler(addr, byte), //self.ppu.vram[addr as usize & 0x2efff] = byte,
-            0x4000 ... 0x4017 => unimplemented!("Trying to write: {:04x} in NES APU & I/O space", addr),
+            0x2000 ... 0x3fff => self.ppu.write_handler(addr, byte),
+            0x4000 ... 0x4017 => self.apu.write(addr, byte),
             0x6000 ... 0x7fff => {
                 // Many CPU tests just store ASCII characters in SRAM
                 // Output as characters when writing to SRAM
@@ -145,6 +148,7 @@ pub struct ExecutionContext {
     pub cart: Cartridge,
     pub ram: Ram,
     pub ppu: Ppu,
+    pub apu: Apu,
 }
 #[derive(Debug, PartialEq)]
 enum AddressMode {
@@ -167,6 +171,7 @@ impl ExecutionContext {
             cart: Cartridge::default(),
             ram: Ram::default(),
             ppu: Ppu::default(),
+            apu: Apu::default(),
         }
     }
     fn adv_pc(&mut self, amount: u16) { self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(amount); }
@@ -204,6 +209,7 @@ impl ExecutionContext {
             0xa8 => self.tay(),
             0xa9 => self.lda(AddressMode::Immediate),
             0xaa => self.tax(),
+            0xac => self.ldy(AddressMode::Absolute),
             0xad => self.lda(AddressMode::Absolute),
             0xae => self.ldx(AddressMode::Absolute),
             0xaf => self.lax(AddressMode::Absolute),
@@ -231,6 +237,7 @@ impl ExecutionContext {
             0x2c => self.bit(AddressMode::ZeroPage),
             0x2e => self.rol(AddressMode::Absolute),
             0x20 => self.jsr(),
+            0x21 => self.and(AddressMode::IndirectX),
             0x24 => self.bit(AddressMode::ZeroPage),
             0x29 => self.and(AddressMode::Immediate),
             0x2d => self.and(AddressMode::Absolute),
@@ -242,6 +249,7 @@ impl ExecutionContext {
             0x4c => self.jmp(AddressMode::Absolute),
             0x50 => self.bvs(),
             0x51 => self.eor(AddressMode::IndirectY),
+            0x54 => self.ign(),
             0x55 => self.eor(AddressMode::ZeroPageX),
             0x5a => self.nop(),
             0x59 => self.eor(AddressMode::AbsoluteY),
@@ -306,10 +314,11 @@ impl ExecutionContext {
             0xf6 => self.inc(AddressMode::ZeroPage),
             0xf7 => self.isc(AddressMode::ZeroPageX),
             0xf8 => self.sed(),
+            0xfe => self.inc(AddressMode::AbsoluteX),
             0xfd => self.sbc(AddressMode::AbsoluteX),
             0xff => self.isc(AddressMode::AbsoluteX),
             0x1e => self.asl(AddressMode::AbsoluteX),
-            _ => eprintln!("Decoding opcode not implemented"),
+            _ => unimplemented!("Unknown opcode:{:04x}", opcode),
         }
         self.cpu.opcode = opcode as u8;
         self.cpu.reg.prev_pc = self.cpu.reg.pc;
@@ -368,9 +377,9 @@ impl ExecutionContext {
         }
     }
     // ASL (Accumulator) helper function for ASL Accumulator
-    fn asla (&mut self) {
+    fn asla(&mut self) {
         let data = self.cpu.reg.a << 1;
-        self.cpu.flags.carry =  data >> 1 & 0xfe != 0;
+        self.cpu.flags.carry = data >> 1 & 0xfe != 0;
         self.cpu.flags.negative;
         self.cpu.reg.a = data as u8;
         self.adv_pc(1);
@@ -384,7 +393,7 @@ impl ExecutionContext {
         // Affected flags: S Z C
 
         let pc = self.cpu.reg.pc;
-       let addr: u16 = match mode {
+        let addr: u16 = match mode {
             AddressMode::ZeroPage => {
                 self.adv_pc(2);
                 self.adv_cycles(5);
@@ -412,7 +421,7 @@ impl ExecutionContext {
         self.write(addr as u16, value);
         // Shift data left by one and write it back to memory
         self.write(addr as u16, value << 1);
-        self.cpu.flags.carry =  value >> 1 & 0xfe != 0;
+        self.cpu.flags.carry = value >> 1 & 0xfe != 0;
         self.cpu.flags.negative = (value & 0x80) != 0;
         self.cpu.flags.zero = (value & 0xff) == 0;
     }
@@ -424,8 +433,9 @@ impl ExecutionContext {
             AddressMode::Immediate => {
                 self.adv_pc(2);
                 self.adv_cycles(2);
-                self.read(pc + 1) as u16 },
-            AddressMode::ZeroPage  => {
+                self.read(pc + 1) as u16
+            },
+            AddressMode::ZeroPage => {
                 self.adv_pc(2);
                 self.adv_cycles(3);
                 self.read(pc + 1) as u16 & 0xff
@@ -435,7 +445,7 @@ impl ExecutionContext {
                 self.adv_pc(2);
                 self.read(pc + 2) as u16 & 0xff + self.cpu.reg.x as u16
             },
-            AddressMode::Absolute  => {
+            AddressMode::Absolute => {
                 self.adv_pc(3);
                 self.adv_cycles(4);
                 self.read_word(pc + 1)
@@ -449,24 +459,22 @@ impl ExecutionContext {
                 self.adv_pc(3);
                 self.adv_cycles(4);
                 self.read_word(pc + 1) + self.cpu.reg.y as u16
-
             },
             AddressMode::IndirectX => {
                 self.adv_cycles(6);
                 self.adv_pc(2);
-                let data = self.read(pc + 2) + self.cpu.reg.x & 0xff;
+                let data = self.read(pc + 1) + self.cpu.reg.x & 0xff;
                 let addr = (self.read(data as u16) as u16 | self.read(data as u16 + 1) as u16) << 8;
-                let value = self.read(addr as u16) & 0xff;
+                let value = self.read(addr as u16);
                 value as u16
             }
             AddressMode::IndirectY => {
                 self.adv_cycles(5);
                 self.adv_pc(2);
-                let data = self.read(pc + 2) + self.cpu.reg.y & 0xff;
+                let data = self.read(pc + 1) + self.cpu.reg.y & 0xff;
                 let addr = (self.read(data as u16) as u16 | self.read(data as u16 + 1) as u16) << 8;
-                let value = self.read(addr as u16) & 0xff;
+                let value = self.read(addr as u16);
                 value as u16
-
             },
             _ => unimplemented!("Illegal {:?} for DEC instruction", mode)
         };
@@ -565,7 +573,7 @@ impl ExecutionContext {
                 let value = self.read(self.cpu.reg.pc + 1) & 0xff;
                 let a = self.cpu.reg.a;
                 self.cpu.flags.zero = (value & a) == 0;
-                self.cpu.flags.negative= (value & 0x80) != 0;
+                self.cpu.flags.negative = (value & 0x80) != 0;
                 self.cpu.flags.overflow = (value & 0x40) != 0;
                 self.adv_cycles(3);
                 self.adv_pc(2);
@@ -581,8 +589,9 @@ impl ExecutionContext {
             self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(((offset ^ 0x80) - 0x80) as u16);
             self.adv_cycles(3);
         } else {
-            self.adv_cycles(2)}
-            self.adv_pc(2);
+            self.adv_cycles(2)
+        }
+        self.adv_pc(2);
     }
     // Branch on overflow set
     fn bvs(&mut self) {
@@ -751,7 +760,6 @@ impl ExecutionContext {
                 self.adv_cycles(6);
                 let mut data = self.read_word(pc + 1) & 0xff + self.cpu.reg.x as u16;
                 data.wrapping_sub(1)
-
             },
             AddressMode::Absolute => {
                 self.adv_cycles(6);
@@ -777,7 +785,6 @@ impl ExecutionContext {
         self.cpu.flags.zero = self.cpu.reg.y & 0xff == 0;
         self.adv_cycles(2);
         self.adv_pc(1);
-
     }
     // Decrement X register
     fn dex(&mut self) {
@@ -786,7 +793,6 @@ impl ExecutionContext {
         self.cpu.flags.zero = self.cpu.reg.x & 0xff == 0;
         self.adv_cycles(2);
         self.adv_pc(1);
-
     }
     // Decrement & compare
     fn dcp(&mut self) {
@@ -813,7 +819,6 @@ impl ExecutionContext {
             AddressMode::IndirectX => {},
             AddressMode::IndirectY => {},
         }
-
     }
     // Exclusive OR (XOR)
     fn eor(&mut self, mode: AddressMode) {
@@ -942,7 +947,6 @@ impl ExecutionContext {
         self.cpu.reg.x = result as u8;
         self.cpu.flags.zero = (result & 0xff) == 0;
         self.cpu.flags.negative = (result & 0x80) != 0;
-
     }
     fn ldy(&mut self, mode: AddressMode) {
         // TODO Handle page boundary crossing
@@ -986,10 +990,9 @@ impl ExecutionContext {
                 data
             }
             _ => unimplemented!("LDY {:?} is illegal", mode)
-
         };
-         self.cpu.flags.zero = (result & 0xff) == 0;
-         self.cpu.flags.negative = (result & 0x80) != 0;
+        self.cpu.flags.zero = (result & 0xff) == 0;
+        self.cpu.flags.negative = (result & 0x80) != 0;
     }
     fn ldx(&mut self, mode: AddressMode) {
         // TODO Handle page boundary crossing
@@ -1033,10 +1036,9 @@ impl ExecutionContext {
                 data
             }
             _ => unimplemented!("LDX {:?} is illegal", mode)
-
         };
-         self.cpu.flags.zero = (result & 0xff) == 0;
-         self.cpu.flags.negative = (result & 0x80) != 0;
+        self.cpu.flags.zero = (result & 0xff) == 0;
+        self.cpu.flags.negative = (result & 0x80) != 0;
     }
     fn lda(&mut self, mode: AddressMode) {
         let pc = self.cpu.reg.pc;
@@ -1142,7 +1144,7 @@ impl ExecutionContext {
             _ => unimplemented!("{:?} not implemented", mode)
         };
         let value: u8 = self.read(addr as u16);
-       // self.write(addr as u16, value);
+        // self.write(addr as u16, value);
         let result = (value >> 1) | ((self.cpu.flags.carry as u8) << 7);
         self.write(addr as u16, result);
         self.cpu.flags.negative = (result & 0x80) != 0;
@@ -1233,12 +1235,9 @@ impl ExecutionContext {
         self.cpu.flags.carry = (result & 0x01) != 0;
         self.adv_cycles(2);
         self.adv_pc(1);
-
-
     }
     // Rotate one bit right memory or accumulator
     fn rol(&mut self, mode: AddressMode) {
-
         let pc = self.cpu.reg.pc;
 
         let src: u16 = match mode {
@@ -1289,8 +1288,6 @@ impl ExecutionContext {
         self.cpu.flags.carry = (result & 0x01) != 0;
         self.adv_pc(1);
         self.adv_cycles(2);
-
-
     }
     fn ror(&mut self, mode: AddressMode) {
         let pc = self.cpu.reg.pc;
@@ -1517,7 +1514,6 @@ impl ExecutionContext {
             }
             _ => unimplemented!()
         };
-
     }
     fn sta(&mut self, mode: AddressMode) {
         // Ex: Absolute: STA $4400 Hex: $8D Len: 3 Cycles:4
@@ -1571,7 +1567,6 @@ impl ExecutionContext {
     fn sty(&mut self, mode: AddressMode) {
         // Ex: Absolute: STA $4400 Hex: $8D Len: 3 Cycles:4
         match mode {
-
             AddressMode::Absolute => {
                 let addr = self.read_word(self.cpu.reg.pc + 1);
                 let y = self.cpu.reg.y;
@@ -1579,7 +1574,7 @@ impl ExecutionContext {
                 self.adv_pc(2);
                 self.adv_cycles(3);
             },
-            AddressMode::ZeroPage=> {
+            AddressMode::ZeroPage => {
                 let addr = self.read_word(self.cpu.reg.pc + 1);
                 let y = self.cpu.reg.y;
                 // Write value of accumulator to memory address
@@ -1590,7 +1585,7 @@ impl ExecutionContext {
             _ => eprintln!("{:?} not covered", mode),
         }
     }
-     fn stx(&mut self, mode: AddressMode) {
+    fn stx(&mut self, mode: AddressMode) {
         // Ex: Absolute: STA $4400 Hex: $8D Len: 3 Cycles:4
         match mode {
             AddressMode::Absolute => {
@@ -1788,7 +1783,6 @@ impl ExecutionContext {
         self.cpu.flags.zero = (self.cpu.reg.x & 0xff) == 0;
         self.cpu.flags.negative = (self.cpu.reg.x & 0x80) != 0;
         self.adv_pc(1);
-
     }
     fn iny(&mut self) {
         self.cpu.reg.y = self.cpu.reg.y.wrapping_add(1);
@@ -1796,8 +1790,20 @@ impl ExecutionContext {
         self.cpu.flags.zero = (self.cpu.reg.y & 0xff) == 0;
         self.cpu.flags.negative = (self.cpu.reg.y & 0x80) != 0;
         self.adv_pc(1);
-
     }
+    fn ign(&mut self) {
+        // IGN d,X ($14 dd, $34 dd, $54 dd, $74 dd, $D4 dd, $F4 dd; 4 cycles)
+        // Reads from memory at the specified address and ignores the value. Affects no register nor flags.
+        // The absolute version can be used to increment PPUADDR or reset the PPUSTATUS latch as an alternative to BIT.
+        // The zero page version has no side effects.
+        // IGN d,X reads from both d and (d+X)&255. IGN a,X additionally reads from a+X-256 it crosses a page boundary (i.e. if ((a & 255) + X) > 255)
+        // Sometimes called TOP (triple-byte no-op), SKW (skip word), DOP (double-byte no-op), or SKB (skip byte).
+        let addr = self.cpu.reg.pc + 1;
+        self.read(addr);
+        self.adv_pc(1);
+        self.adv_cycles(2);
+    }
+
     // Jump to Subroutine
     fn jsr(&mut self) {
         self.cpu.reg.prev_pc = self.cpu.reg.pc;
@@ -1824,7 +1830,6 @@ impl ExecutionContext {
         self.cpu.flags.carry = true;
         self.adv_cycles(2);
         self.adv_pc(1);
-
     }
     fn sei(&mut self) {
         self.cpu.flags.interrupt = true;
@@ -1855,5 +1860,19 @@ impl ExecutionContext {
         self.cpu.flags.zero = (result & 0xff) == 0;
         self.cpu.flags.negative = (result & 0x80) != 0;
         self.cpu.reg.a = result as u8;
+    }
+    // Reset CPU to initial powerup state
+    pub fn reset(&mut self) {
+        // TODO PPU reset
+        // Read reset vector
+        self.cpu.reg.pc = self.read_word(0xfffc);
+        self.cpu.reg.sp = 0xfd;
+        self.cpu.flags.carry = false;
+        self.cpu.flags.zero = false;
+        // Interrupt disable flag should be on on power up / reset
+        self.cpu.flags.interrupt = true;
+        self.cpu.flags.decimal = false;
+        self.cpu.flags.brk = false;
+        self.cpu.flags.overflow = false;
     }
 }
