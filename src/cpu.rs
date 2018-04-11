@@ -487,9 +487,9 @@ impl ExecutionContext {
     // Branch if Carry Set
     fn bcs(&mut self) {
         if self.cpu.flags.carry {
-            let offset = self.read(self.cpu.reg.pc + 1) as i16;
+            let offset = self.read(self.cpu.reg.pc + 1) as i8 as u16;
             self.cpu.reg.prev_pc = self.cpu.reg.pc;
-            self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(((offset ^ 0x80) - 0x80) as u16);
+            self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
             self.adv_cycles(1);
         } else {
             self.adv_pc(2);
@@ -498,9 +498,9 @@ impl ExecutionContext {
     }
     fn bcc(&mut self) {
         if !self.cpu.flags.carry {
-            let offset = self.read(self.cpu.reg.pc + 1) as i16;
+            let offset = self.read(self.cpu.reg.pc + 1) as i8 as u16;
             self.cpu.reg.prev_pc = self.cpu.reg.pc;
-            self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(((offset ^ 0x80) - 0x80) as u16);
+            self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
             self.adv_cycles(1);
         } else {
             self.adv_pc(2);
@@ -510,9 +510,9 @@ impl ExecutionContext {
     // Branch on Equal
     fn beq(&mut self) {
         if self.cpu.flags.zero {
-            let offset = self.read(self.cpu.reg.pc + 1) as i16;
             self.cpu.reg.prev_pc = self.cpu.reg.pc;
-            self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(((offset ^ 0x80) - 0x80) as u16);
+            let offset = self.read(self.cpu.reg.pc + 1) as i8 as u16;
+            self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
             self.adv_cycles(1);
         } else {
             self.adv_pc(2);
@@ -525,9 +525,9 @@ impl ExecutionContext {
         // 2 cycles (+ 1 if branch succeeds, +2 if to a new page)
         // This is for all branch instructions
         if !self.cpu.flags.negative {
-            let offset = self.read(self.cpu.reg.pc + 1) as i16;
+            let offset = self.read(self.cpu.reg.pc + 1) as i8 as u16;
             self.cpu.reg.prev_pc = self.cpu.reg.pc;
-            self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(((offset ^ 0x80) - 0x80) as u16);
+            self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
             self.adv_cycles(1);
         } else {
             self.adv_pc(2);
@@ -538,9 +538,9 @@ impl ExecutionContext {
     fn bpl(&mut self) {
         // Cycles 3+ / 2
         if !self.cpu.flags.negative {
-            let offset = self.read(self.cpu.reg.pc + 1) as i16;
+            let offset = self.read(self.cpu.reg.pc + 1) as i8 as u16;
             self.cpu.reg.prev_pc = self.cpu.reg.pc;
-            self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(((offset ^ 0x80) - 0x80) as u16);
+            self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
             self.adv_cycles(3);
         } else {
             self.adv_pc(2);
@@ -584,9 +584,9 @@ impl ExecutionContext {
     fn bne(&mut self) {
         // If zero flag is 0 branch
         if !self.cpu.flags.zero {
-            let offset = self.read(self.cpu.reg.pc + 1) as i16;
+            let offset = self.read(self.cpu.reg.pc + 1) as i8 as u16;
             self.cpu.reg.prev_pc = self.cpu.reg.pc;
-            self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(((offset ^ 0x80) - 0x80) as u16);
+            self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
             self.adv_cycles(3);
         } else {
             self.adv_cycles(2)
@@ -596,9 +596,9 @@ impl ExecutionContext {
     // Branch on overflow set
     fn bvs(&mut self) {
         if self.cpu.flags.overflow {
-            let offset = self.read(self.cpu.reg.pc + 1) as i16;
+            let offset = self.read(self.cpu.reg.pc + 1) as i8 as u16;
             self.cpu.reg.prev_pc = self.cpu.reg.pc;
-            self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(((offset ^ 0x80) - 0x80) as u16);
+            self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
             self.adv_cycles(3);
         } else {
             self.adv_cycles(2);
@@ -1206,14 +1206,14 @@ impl ExecutionContext {
             }
             AddressMode::IndirectX => {
                 let value = self.cpu.reg.pc + 1;
-                let result = self.read(value) << 1 + self.cpu.reg.x as u16;
+                let result = self.read(value) << 1 + self.cpu.reg.x;
                 self.adv_pc(2);
                 self.adv_cycles(8);
                 result as u16
             }
             AddressMode::IndirectY => {
                 let value = self.cpu.reg.pc + 1;
-                let result = self.read(value) << 1 + self.cpu.reg.y as u16;
+                let result = self.read(value) << 1 + self.cpu.reg.y;
                 self.adv_pc(2);
                 self.adv_cycles(8);
                 result as u16
@@ -1408,14 +1408,14 @@ impl ExecutionContext {
             },
             AddressMode::IndirectX => {
                 let value = pc + 1;
-                let data = self.read(value) << 1 + self.cpu.reg.x as u16;
+                let data = self.read(value) << 1 + self.cpu.reg.x;
                 self.adv_pc(2);
                 self.adv_cycles(6);
                 data as u16
             }
             AddressMode::IndirectY => {
                 let value = pc + 1;
-                let data = self.read(value) << 1 + self.cpu.reg.y as u16;
+                let data = self.read(value) << 1 + self.cpu.reg.y;
                 self.adv_pc(2);
                 self.adv_cycles(6);
                 data as u16
@@ -1496,7 +1496,7 @@ impl ExecutionContext {
             },
             AddressMode::IndirectX => {
                 let value = self.cpu.reg.pc + 1;
-                let result = self.read(value) << 1 + self.cpu.reg.x as u16;
+                let result = self.read(value) << 1 + self.cpu.reg.x;
                 self.cpu.reg.a |= result as u8;
                 self.cpu.flags.carry = value & 0x80 != 0;
                 self.cpu.flags.zero = value & 0xff == 0;
@@ -1505,7 +1505,7 @@ impl ExecutionContext {
             },
             AddressMode::IndirectY => {
                 let value = self.cpu.reg.pc + 1;
-                let result = self.read(value) << 1 + self.cpu.reg.y as u16;
+                let result = self.read(value) << 1 + self.cpu.reg.y;
                 self.cpu.reg.a |= result as u8;
                 self.cpu.flags.carry = value & 0x80 != 0;
                 self.cpu.flags.zero = value & 0xff == 0;
