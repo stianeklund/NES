@@ -1496,8 +1496,7 @@ impl ExecutionContext {
             },
             AddressMode::IndirectX => {
                 let value = self.cpu.reg.pc + 1;
-                let result = self.read(value) << 1 + self.cpu.reg.x;
-                self.cpu.reg.a |= result as u8;
+                let result: u16 = (self.read(value) as u16) << 1 + self.cpu.reg.x as u16;
                 self.cpu.flags.carry = value & 0x80 != 0;
                 self.cpu.flags.zero = value & 0xff == 0;
                 self.adv_pc(2);
@@ -1505,7 +1504,7 @@ impl ExecutionContext {
             },
             AddressMode::IndirectY => {
                 let value = self.cpu.reg.pc + 1;
-                let result = self.read(value) << 1 + self.cpu.reg.y;
+                let result = (self.read(value) as u16) << 1 + self.cpu.reg.y as u16;
                 self.cpu.reg.a |= result as u8;
                 self.cpu.flags.carry = value & 0x80 != 0;
                 self.cpu.flags.zero = value & 0xff == 0;
