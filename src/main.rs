@@ -43,7 +43,7 @@ fn main() {
     println!("IRQ Vector:   {:04x}", ctx.read_word(0xfffe));
     ctx.cpu.reg.pc = ctx.read_word(0xfffc);
     // For nestest only
-    ctx.cpu.reg.pc = 0xc000;
+    // ctx.cpu.reg.pc = 0xc000;
 
     // Step one instruction at a time
     loop {

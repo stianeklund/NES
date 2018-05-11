@@ -82,25 +82,6 @@ impl Ppu {
             reg: Registers::default(),
         }
     }
-    pub fn read_handler(&self, addr: u16) -> u8 {
-        match addr {
-            0x2000 => self.reg.ppu_ctrl,
-            0x2001 => self.reg.ppu_mask,
-            0x2007 => self.reg.ppu_data,
-            _ => unimplemented!()
-        }
-    }
-    pub fn write_handler(&mut self, addr: u16, byte: u8) {
-        match addr {
-           0x2000 => self.reg.ppu_ctrl_write(byte),
-           0x2001 => self.reg.ppu_mask_write(byte),
-           0x2007 => {
-               println!("Writng {:04x} to {:04x}", byte, addr);
-               self.reg.ppu_data_write(byte);
-           },
-            _ => unimplemented!("Byte: {:04x} Addr: {:04x}", byte, addr)
-        }
-    }
 }
 // The PPU addresses a 16kB space, $0000-3FFF.
 // TODO Improve mapper to handle writes to registers that have write enable
@@ -110,8 +91,10 @@ impl MemoryMapper for Ppu {
             0... 0x1fff => self.chr[addr as usize],
             // TODO PPU Mirror? Is PPU size to `$3fff`?
             // Pattern Tables to be split up or just use one array & mask off what we need?
-            0x2000 ... 0x2fff => self.vram[addr as usize],
-            // Mirror
+            0x2000 => self.reg.ppu_ctrl,
+            0x2001 => self.reg.ppu_mask,
+            0x2007 => self.reg.ppu_data,
+            0x2008 ... 0x2fff => self.vram[addr as usize],
             0x3000 ... 0x3eff => self.vram[addr as usize & 0x2eff],
             0x3f00 ... 0x3fff => panic!("Internal palette control; not implemented"),
             _ => panic!("Unrecognized addr: {:04x}", addr)
@@ -120,9 +103,15 @@ impl MemoryMapper for Ppu {
     fn write(&mut self, addr: u16, byte: u8) {
         match addr {
             0... 0x1fff => self.chr[addr as usize] = byte,
+            0x2000 => self.reg.ppu_ctrl_write(byte),
+            0x2001 => self.reg.ppu_mask_write(byte),
+            0x2007 => {
+               println!("Writng {:04x} to {:04x}", byte, addr);
+               self.reg.ppu_data_write(byte);
+           },
             // TODO PPU Mirror? Is PPU size to `$3fff`?
             // Pattern Tables to be split up or just use one array & mask off what we need?
-            0x2000 ... 0x2fff => self.vram[addr as usize] = byte,
+            0x2007 ... 0x2fff => self.vram[addr as usize] = byte,
             // Mirror
             0x3000 ... 0x3eff => self.vram[addr as usize & 0x2eff] = byte,
             0x3f00 ... 0x3fff => panic!("Internal palette control; not implemented"),

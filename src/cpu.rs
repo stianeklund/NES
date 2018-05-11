@@ -12,7 +12,7 @@ impl MemoryMapper for ExecutionContext {
             // See https://wiki.nesdev.com/w/index.php/CPU_memory_map
             0...0x07ff => self.ram.memory[addr as usize] as u8,
             // TODO Rewrite PPU read method to handle addresses like APU
-            0x2000 ... 0x3fff => self.ppu.read_handler(addr), // self.ppu.vram[addr as usize & 0x2efff],
+            0x2000 ... 0x3fff => self.ppu.read(addr),
             0x4000 ... 0x4017 => self.apu.read(addr),
             // $6000-$7FFF = Battery Backed Save or Work RAM
             0x6000 ... 0x7fff => self.ram.sram[addr as usize] as u8,
@@ -40,7 +40,7 @@ impl MemoryMapper for ExecutionContext {
             // but it can be partly or fully remapped to RAM on the cartridge,
             // allowing up to 4 simultaneous nametables.
 
-            0x2000 ... 0x3fff => self.ppu.write_handler(addr, byte),
+            0x2000 ... 0x3fff => self.ppu.write(addr,byte),
             0x4000 ... 0x4017 => self.apu.write(addr, byte),
             0x6000 ... 0x7fff => {
                 // Many CPU tests just store ASCII characters in SRAM
@@ -121,7 +121,7 @@ impl Cpu {
             reg: Registers {
                 pc: 0,
                 prev_pc: 0,
-                sp: 0, // 0xfd,
+                sp: 0,
                 a: 0,
                 x: 0,
                 y: 0,
@@ -1863,6 +1863,7 @@ impl ExecutionContext {
     // Reset CPU to initial powerup state
     pub fn reset(&mut self) {
         // TODO PPU reset
+
         // Read reset vector
         self.cpu.reg.pc = self.read_word(0xfffc);
         self.cpu.reg.sp = 0xfd;
