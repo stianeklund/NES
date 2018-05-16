@@ -11,7 +11,6 @@ impl MemoryMapper for ExecutionContext {
         match addr {
             // See https://wiki.nesdev.com/w/index.php/CPU_memory_map
             0...0x07ff => self.ram.memory[addr as usize] as u8,
-            // TODO Rewrite PPU read method to handle addresses like APU
             0x2000 ... 0x3fff => self.ppu.read(addr),
             0x4000 ... 0x4017 => self.apu.read(addr),
             // $6000-$7FFF = Battery Backed Save or Work RAM
@@ -220,6 +219,7 @@ impl ExecutionContext {
             0xb8 => self.clv(),
             0xb9 => self.lda(AddressMode::AbsoluteY),
             0xba => self.tsx(),
+            0xbc => self.ldy(AddressMode::AbsoluteX),
             0xbd => self.lda(AddressMode::AbsoluteX),
             0xbe => self.ldx(AddressMode::AbsoluteY),
             0xc0 => self.cpy(AddressMode::Immediate),
@@ -283,7 +283,6 @@ impl ExecutionContext {
             0x98 => self.tya(),
             0x9a => self.txs(),
             0x9d => self.sta(AddressMode::AbsoluteX),
-            0xc0 => self.cpy(AddressMode::Immediate),
             0xc3 => self.dcp(),
             0xc4 => self.cpy(AddressMode::ZeroPage),
             0xc6 => self.dec(AddressMode::ZeroPage),
@@ -358,11 +357,13 @@ impl ExecutionContext {
                 self.adv_cycles(4);
             }
             AddressMode::AbsoluteX => {
+                if (result - self.cpu.reg.x as u16) & 0xff00 != result & 0xff00 { self.adv_cycles(1); }
                 self.adv_pc(3);
                 self.adv_cycles(4);
             }
             AddressMode::AbsoluteY => {
                 self.adv_pc(3);
+                if (result - self.cpu.reg.y as u16) & 0xff00 != result & 0xff00 { self.adv_cycles(1); }
                 self.adv_cycles(4);
             }
             AddressMode::IndirectX => {
@@ -371,6 +372,7 @@ impl ExecutionContext {
             }
             AddressMode::IndirectY => {
                 self.adv_pc(2);
+                if (result - self.cpu.reg.y as u16) & 0xff00 != result & 0xff00 { self.adv_cycles(1); }
                 self.adv_cycles(5);
             }
             _ => unimplemented!("ADC address mode not supported {:?}", mode),
@@ -412,7 +414,9 @@ impl ExecutionContext {
             AddressMode::AbsoluteX => {
                 self.adv_pc(3);
                 self.adv_cycles(7);
-                self.read_word(pc + 1) as u16 + self.cpu.reg.x as u16
+                let data = self.read_word(pc + 1) as u16 + self.cpu.reg.x as u16;
+                if (data - self.cpu.reg.x as u16) & 0xff00 != data & 0xff00 { self.adv_cycles(1); }
+                data
             },
             _ => unimplemented!()
         };
@@ -453,12 +457,16 @@ impl ExecutionContext {
             AddressMode::AbsoluteX => {
                 self.adv_pc(3);
                 self.adv_cycles(4);
-                self.read_word(pc + 1) + self.cpu.reg.x as u16
+                let data = self.read_word(pc + 1) + self.cpu.reg.x as u16;
+                if (data - self.cpu.reg.x as u16) & 0xff00 != data & 0xff00 { self.adv_cycles(1); }
+                data
             },
             AddressMode::AbsoluteY => {
                 self.adv_pc(3);
                 self.adv_cycles(4);
-                self.read_word(pc + 1) + self.cpu.reg.y as u16
+                let data = self.read_word(pc + 1) + self.cpu.reg.y as u16;
+                if (data - self.cpu.reg.x as u16) & 0xff00 != data & 0xff00 { self.adv_cycles(1); }
+                data
             },
             AddressMode::IndirectX => {
                 self.adv_cycles(6);
@@ -474,6 +482,7 @@ impl ExecutionContext {
                 let data = self.read(pc + 1) + self.cpu.reg.y & 0xff;
                 let addr = (self.read(data as u16) as u16 | self.read(data as u16 + 1) as u16) << 8;
                 let value = self.read(addr as u16);
+                if (data as u16 - self.cpu.reg.y as u16) & 0xff00 != data as u16 & 0xff00 { self.adv_cycles(1); }
                 value as u16
             },
             _ => unimplemented!("Illegal {:?} for DEC instruction", mode)
@@ -663,12 +672,14 @@ impl ExecutionContext {
                 self.adv_pc(3);
                 self.adv_cycles(4);
                 let value = self.read(pc + 1).wrapping_add(self.cpu.reg.x) as u16;
+                if (value - self.cpu.reg.x as u16) & 0xff00 != value & 0xff00 { self.adv_cycles(1); }
                 a - value as u16
             },
             AddressMode::AbsoluteY => {
                 self.adv_cycles(4);
                 self.adv_pc(3);
                 let value = self.read(pc + 1).wrapping_add(self.cpu.reg.y) as u16;
+                if (value - self.cpu.reg.y as u16) & 0xff00 != value & 0xff00 { self.adv_cycles(1); }
                 a - value as u16
             },
             AddressMode::IndirectX => {
@@ -679,11 +690,13 @@ impl ExecutionContext {
                 let value = self.read(addr as u16) & 0xff;
                 a - value as u16
             },
+            // TODO Better naming (this is confusing...)
             AddressMode::IndirectY => {
                 self.adv_cycles(5);
                 self.adv_pc(2);
                 let data = self.read(pc + 2) + self.cpu.reg.y & 0xff;
                 let addr = (self.read(data as u16) as u16 | self.read(data as u16 + 1) as u16) << 8;
+                if (data as u16 - self.cpu.reg.y as u16) & 0xff00 != data as u16 & 0xff00 { self.adv_cycles(1); }
                 let value = self.read(addr as u16) & 0xff;
                 a - value as u16
             }
@@ -758,19 +771,20 @@ impl ExecutionContext {
             AddressMode::ZeroPageX => {
                 self.adv_pc(2);
                 self.adv_cycles(6);
-                let mut data = self.read_word(pc + 1) & 0xff + self.cpu.reg.x as u16;
+                let data = self.read_word(pc + 1) & 0xff + self.cpu.reg.x as u16;
                 data.wrapping_sub(1)
             },
             AddressMode::Absolute => {
                 self.adv_cycles(6);
                 self.adv_pc(3);
-                let mut data = self.read_word(pc);
+                let data = self.read_word(pc);
                 data.wrapping_sub(1)
             },
             AddressMode::AbsoluteX => {
                 self.adv_cycles(3);
                 self.adv_pc(7);
-                let mut data = self.read_word(self.cpu.reg.pc + 1) + self.cpu.reg.x as u16;
+                let data = self.read_word(self.cpu.reg.pc + 1) + self.cpu.reg.x as u16;
+                if (data - self.cpu.reg.x as u16) & 0xff00 != data & 0xff00 { self.adv_cycles(1); }
                 data.wrapping_sub(1)
             },
             _ => unimplemented!("DEC {:?} is invalid", mode)
@@ -852,12 +866,16 @@ impl ExecutionContext {
             AddressMode::AbsoluteX => {
                 self.adv_cycles(4);
                 self.adv_pc(3);
-                self.read_word(pc + 1) + self.cpu.reg.x as u16
+                let data = self.read_word(pc + 1) + self.cpu.reg.x as u16;
+                if (data - self.cpu.reg.x as u16) & 0xff00 != data & 0xff00 { self.adv_cycles(1); }
+                data
             }
             AddressMode::AbsoluteY => {
                 self.adv_cycles(4);
                 self.adv_pc(3);
-                self.read_word(pc + 1) + self.cpu.reg.y as u16
+                let data = self.read_word(pc + 1) + self.cpu.reg.y as u16;
+                if (data - self.cpu.reg.x as u16) & 0xff00 != data & 0xff00 { self.adv_cycles(1); }
+                data
             }
             AddressMode::IndirectX => {
                 self.adv_cycles(6);
@@ -873,6 +891,7 @@ impl ExecutionContext {
                 let data = (self.read(pc + 2) as u16) + (self.cpu.reg.y & 0xff) as u16;
                 let addr = (self.read(data) as u16 | self.read(data + 1) as u16) << 8;
                 let value = self.read(addr as u16) & 0xff;
+                if (data - self.cpu.reg.y as u16) & 0xff00 != data & 0xff00 { self.adv_cycles(1); }
                 value as u16
             }
             _ => unimplemented!("{:?} not supported", mode)
@@ -918,12 +937,16 @@ impl ExecutionContext {
             AddressMode::AbsoluteX => {
                 self.adv_pc(3);
                 self.adv_cycles(4);
-                self.read_word(pc + 1)
+                let data = self.read_word(pc + 1) + self.cpu.reg.x as u16;
+                if (data - self.cpu.reg.x as u16) & 0xff00 != data & 0xff00 { self.adv_cycles(1); }
+                data
             },
             AddressMode::AbsoluteY => {
                 self.adv_pc(3);
                 self.adv_cycles(4);
-                self.read_word(pc + 1)
+                let data = self.read_word(pc + 1) + self.cpu.reg.y as u16;
+                if (data - self.cpu.reg.y as u16) & 0xff00 != data & 0xff00 { self.adv_cycles(1); }
+                data
             },
             AddressMode::IndirectX => {
                 let data = (self.read(pc + 2) as u16) + (self.cpu.reg.x & 0xff) as u16;
@@ -937,6 +960,7 @@ impl ExecutionContext {
                 let data = (self.read(pc + 2) as u16) + (self.cpu.reg.y & 0xff) as u16;
                 let addr = (self.read(data) as u16 | self.read(data + 1) as u16) << 8;
                 let value = self.read(addr as u16) & 0xff;
+                if (data - self.cpu.reg.y as u16) & 0xff00 != data & 0xff00 { self.adv_cycles(1); }
                 self.adv_cycles(6);
                 self.adv_pc(2);
                 value as u16
@@ -949,8 +973,6 @@ impl ExecutionContext {
         self.cpu.flags.negative = (result & 0x80) != 0;
     }
     fn ldy(&mut self, mode: AddressMode) {
-        // TODO Handle page boundary crossing
-        // + 1 cycle if page boundary is crossed
         let pc = self.cpu.reg.pc;
         let result: u16 = match mode {
             AddressMode::Absolute => {
@@ -962,6 +984,7 @@ impl ExecutionContext {
             },
             AddressMode::AbsoluteX => {
                 let data = self.read_word(pc + 1) + self.cpu.reg.x as u16;
+                if (data - self.cpu.reg.x as u16) & 0xff00 != data & 0xff00 { self.adv_cycles(1); }
                 self.cpu.reg.y = data as u8;
                 self.adv_pc(3);
                 self.adv_cycles(4);
@@ -982,7 +1005,6 @@ impl ExecutionContext {
                 data
             }
             AddressMode::ZeroPageX => {
-                // TODO Handle boundary crossing
                 let data = (self.read_word(pc + 1) & 0xff) + self.cpu.reg.x as u16;
                 self.cpu.reg.y = data as u8;
                 self.adv_pc(2);
@@ -1008,6 +1030,7 @@ impl ExecutionContext {
             },
             AddressMode::AbsoluteX => {
                 let data = self.read_word(pc + 1) + self.cpu.reg.x as u16;
+                if (data - self.cpu.reg.x as u16) & 0xff00 != data & 0xff00 { self.adv_cycles(1); }
                 self.cpu.reg.x = data as u8;
                 self.adv_pc(3);
                 self.adv_cycles(4);
@@ -1028,7 +1051,6 @@ impl ExecutionContext {
                 data
             }
             AddressMode::ZeroPageX => {
-                // TODO Handle boundary crossing
                 let data = (self.read_word(pc + 1) & 0xff) + self.cpu.reg.x as u16;
                 self.cpu.reg.x = data as u8;
                 self.adv_pc(2);
@@ -1053,6 +1075,11 @@ impl ExecutionContext {
             },
             AddressMode::AbsoluteX => {
                 let data = self.read_word(pc + 1) + self.cpu.reg.x as u16;
+
+
+                // Check if the difference between read value - reg & mask off high 8 bits.
+                // If not equal increment the cycle counter, as we've crossed the boundary
+                if (data - self.cpu.reg.x as u16) & 0xff00 != data & 0xff00 { self.adv_cycles(1); }
                 self.cpu.reg.a = data as u8;
                 self.adv_cycles(4);
                 self.adv_pc(3);
@@ -1060,6 +1087,8 @@ impl ExecutionContext {
             },
             AddressMode::AbsoluteY => {
                 let data = self.read_word(pc + 1) + self.cpu.reg.y as u16;
+
+                if (data - self.cpu.reg.y as u16) & 0xff00 != data & 0xff00 { self.adv_cycles(1); }
                 self.cpu.reg.a = data as u8;
                 self.adv_cycles(4);
                 self.adv_pc(3);
@@ -1077,6 +1106,7 @@ impl ExecutionContext {
                 // Indirect is 3 bytes
                 let data = (self.read(pc + 1) as u16) + (self.cpu.reg.y & 0xff) as u16;
                 let addr = (self.read(data) as u16 | self.read(data + 1) as u16) << 8;
+                if (data - self.cpu.reg.y as u16) & 0xff00 != data & 0xff00 { self.adv_cycles(1); }
                 let value = self.read(addr as u16) & 0xff;
                 self.adv_cycles(6);
                 self.adv_pc(2);
@@ -1137,6 +1167,7 @@ impl ExecutionContext {
             }
             AddressMode::AbsoluteX => {
                 let data = self.read_word(pc + 1) + self.cpu.reg.x as u16;
+                if (data - self.cpu.reg.x as u16) & 0xff00 != data & 0xff00 { self.adv_cycles(1); }
                 self.adv_cycles(6);
                 self.adv_pc(3);
                 data
@@ -1167,7 +1198,6 @@ impl ExecutionContext {
         self.adv_pc(1);
         self.adv_cycles(2);
     }
-    // TODO
     fn ora(&mut self, mode: AddressMode) {
         let pc = self.cpu.reg.pc;
         let value = match mode {
@@ -1197,12 +1227,16 @@ impl ExecutionContext {
             AddressMode::AbsoluteX => {
                 self.adv_cycles(4);
                 self.adv_pc(3);
-                self.read_word(pc) + self.cpu.reg.x as u16
+                let data = self.read_word(pc) + self.cpu.reg.x as u16;
+                if (data - self.cpu.reg.x as u16) & 0xff00 != data & 0xff00 { self.adv_cycles(1); }
+                data
             }
             AddressMode::AbsoluteY => {
                 self.adv_cycles(4);
                 self.adv_pc(3);
-                self.read_word(pc) + self.cpu.reg.y as u16
+                let data = self.read_word(pc) + self.cpu.reg.y as u16;
+                if (data - self.cpu.reg.y as u16) & 0xff00 != data & 0xff00 { self.adv_cycles(1); }
+                data
             }
             AddressMode::IndirectX => {
                 let value = self.cpu.reg.pc + 1;
@@ -1212,8 +1246,9 @@ impl ExecutionContext {
                 result as u16
             }
             AddressMode::IndirectY => {
-                let value = self.cpu.reg.pc + 1;
-                let result = self.read(value) << 1 + self.cpu.reg.y;
+                let data = self.cpu.reg.pc + 1;
+                let result = self.read(data) << 1 + self.cpu.reg.y;
+                if (data - self.cpu.reg.y as u16) & 0xff00 != data & 0xff00 { self.adv_cycles(1); }
                 self.adv_pc(2);
                 self.adv_cycles(8);
                 result as u16
@@ -1259,7 +1294,9 @@ impl ExecutionContext {
             AddressMode::AbsoluteX => {
                 self.adv_cycles(7);
                 self.adv_pc(3);
-                self.read_word(pc) + self.cpu.reg.x as u16
+                let data = self.read_word(pc) + self.cpu.reg.x as u16;
+                if (data - self.cpu.reg.x as u16) & 0xff00 != data & 0xff00 { self.adv_cycles(1); }
+                data
             }
             _ => { unreachable!("Address mode {:?} should not be called on ROL", mode) }
         };
@@ -1311,7 +1348,9 @@ impl ExecutionContext {
             AddressMode::AbsoluteX => {
                 self.adv_cycles(7);
                 self.adv_pc(3);
-                self.read_word(pc) + self.cpu.reg.x as u16
+                let data = self.read_word(pc) + self.cpu.reg.x as u16;
+                if (data - self.cpu.reg.x as u16) & 0xff00 != data & 0xff00 { self.adv_cycles(1); }
+                data
             }
             _ => { unreachable!("Address mode {:?} should not be called on ROR", mode) }
         };
@@ -1396,12 +1435,14 @@ impl ExecutionContext {
             },
             AddressMode::AbsoluteX => {
                 let data = self.read_word(pc + 1) + self.cpu.reg.x as u16;
+                if (data - self.cpu.reg.x as u16) & 0xff00 != data & 0xff00 { self.adv_cycles(1); }
                 self.adv_cycles(4);
                 self.adv_pc(3);
                 data
             },
             AddressMode::AbsoluteY => {
                 let data = self.read_word(pc + 1) + self.cpu.reg.x as u16;
+                if (data - self.cpu.reg.y as u16) & 0xff00 != data & 0xff00 { self.adv_cycles(1); }
                 self.adv_cycles(4);
                 self.adv_pc(3);
                 data
@@ -1414,8 +1455,9 @@ impl ExecutionContext {
                 data as u16
             }
             AddressMode::IndirectY => {
-                let value = pc + 1;
-                let data = self.read(value) << 1 + self.cpu.reg.y;
+                let addr = pc + 1;
+                let data = self.read(addr) << 1 + self.cpu.reg.y;
+                if (data as u16 - self.cpu.reg.y as u16) & 0xff00 != data as u16 & 0xff00 { self.adv_cycles(1); }
                 self.adv_pc(2);
                 self.adv_cycles(6);
                 data as u16
@@ -1480,6 +1522,7 @@ impl ExecutionContext {
             },
             AddressMode::AbsoluteX => {
                 let value = self.read_word(self.cpu.reg.pc + 1) << 1 + self.cpu.reg.x as u16;
+                if (value - self.cpu.reg.y as u16) & 0xff00 != value & 0xff00 { self.adv_cycles(1); }
                 self.cpu.reg.a |= value as u8;
                 self.cpu.flags.carry = value & 0x80 != 0;
                 self.cpu.flags.zero = value & 0xff == 0;
@@ -1488,6 +1531,7 @@ impl ExecutionContext {
             },
             AddressMode::AbsoluteY => {
                 let value = self.read_word(self.cpu.reg.pc + 1) << 1 + self.cpu.reg.y as u16;
+                if (value - self.cpu.reg.y as u16) & 0xff00 != value & 0xff00 { self.adv_cycles(1); }
                 self.cpu.reg.a |= value as u8;
                 self.cpu.flags.carry = value & 0x80 != 0;
                 self.cpu.flags.zero = value & 0xff == 0;
@@ -1505,6 +1549,7 @@ impl ExecutionContext {
             AddressMode::IndirectY => {
                 let value = self.cpu.reg.pc + 1;
                 let result = (self.read(value) as u16) << 1 + self.cpu.reg.y as u16;
+                if (value - self.cpu.reg.y as u16) & 0xff00 != value & 0xff00 { self.adv_cycles(1); }
                 self.cpu.reg.a |= result as u8;
                 self.cpu.flags.carry = value & 0x80 != 0;
                 self.cpu.flags.zero = value & 0xff == 0;
@@ -1514,6 +1559,7 @@ impl ExecutionContext {
             _ => unimplemented!()
         };
     }
+    // TODO Fix indirect write?
     fn sta(&mut self, mode: AddressMode) {
         // Ex: Absolute: STA $4400 Hex: $8D Len: 3 Cycles:4
         let pc = self.cpu.reg.pc;
@@ -1528,6 +1574,7 @@ impl ExecutionContext {
             },
             AddressMode::AbsoluteX => {
                 let addr = self.read_word(pc + 1) + self.cpu.reg.x as u16;
+                if (addr - self.cpu.reg.x as u16) & 0xff00 != addr & 0xff00 { self.adv_cycles(1); }
                 self.write(addr, a);
                 self.adv_cycles(5);
                 self.adv_pc(3);
@@ -1540,12 +1587,12 @@ impl ExecutionContext {
             },
             AddressMode::IndirectY => {
                 let addr = self.read_word(pc + 1) + self.cpu.reg.y as u16;
+                if (addr - self.cpu.reg.y as u16) & 0xff00 != addr & 0xff00 { self.adv_cycles(1); }
                 self.write(addr, a);
                 self.adv_cycles(6);
                 self.adv_pc(2);
             },
             AddressMode::ZeroPage => {
-                // Mask the upper two bytes
                 let addr = self.read_word(pc + 1) & 0xff;
                 // Write value of accumulator to memory address
                 self.write(addr, self.cpu.reg.a);
@@ -1553,7 +1600,6 @@ impl ExecutionContext {
                 self.adv_pc(2);
             }
             AddressMode::ZeroPageX => {
-                // Mask the upper two bytes
                 let addr = self.read_word(pc + 1) & 0xff + self.cpu.reg.x as u16;
                 // Write value of accumulator to memory address
                 self.write(addr, self.cpu.reg.a);
@@ -1764,6 +1810,7 @@ impl ExecutionContext {
             },
             AddressMode::AbsoluteX => {
                 let value = self.read_word(pc + 1) + self.cpu.reg.x as u16;
+                if (value - self.cpu.reg.x as u16) & 0xff00 != value & 0xff00 { self.adv_cycles(1); }
                 let addr = self.read_word(value) as u8;
                 self.write(value, addr);
                 self.adv_pc(3);
@@ -1844,6 +1891,7 @@ impl ExecutionContext {
 
                 let value = self.cpu.reg.pc.wrapping_add(1);
                 let addr = self.read_word(value).wrapping_add(self.cpu.reg.x as u16);
+                if (value - self.cpu.reg.x as u16) & 0xff00 != value & 0xff00 { self.adv_cycles(1); }
                 (self.cpu.reg.a as u16).wrapping_sub(addr as u16).wrapping_sub(self.cpu.flags.carry as u16)
             }
             AddressMode::ZeroPageX => {

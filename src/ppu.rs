@@ -40,7 +40,7 @@ impl Registers {
         self.ppu_ctrl = value >> 3 & 0; // 0 = $2000; 1 = $2400; 2 = $2800; 3 = $2c00;
         self.ppu_ctrl = value >> 2 & 1; // VRAM addr (increment per CPU r/w of PPUDATA
         self.ppu_ctrl = value  >> 3 & 1;
-        self.ppu_ctrl = (value >> 4 & 1);
+        self.ppu_ctrl = value >> 4 & 1;
         self.ppu_ctrl = value >> 5 & 1;
         self.ppu_ctrl = value >> 6 & 1;
         self.ppu_ctrl = value >> 7 & 1;
