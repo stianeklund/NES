@@ -159,8 +159,8 @@ enum AddressMode {
     AbsoluteX,   // X indexed. Fetches the next 2 mem slots & combines them into a word, then adds X.
     AbsoluteY,   // Y indexed. Fetches the next 2 mem slots & combines them into a word, then adds Y.
     Indirect,    // Indirect addressing; special for JMP (Not really implemented or needed?)
-    IndirectX,   // X indexed addressing.
-    IndirectY,   // Y indexed addressing.
+    IndirectX,   // Indexed Indirect (only used on X reg). See: http://www.emulator101.com/6502-addressing-modes.html
+    IndirectY,   // Indirect Indexed (only used on Y reg) see above URL.
 }
 
 impl ExecutionContext {
@@ -269,6 +269,7 @@ impl ExecutionContext {
             0x72 => self.nop(),
             0x73 => self.nop(),
             0x78 => self.sei(),
+            0x79 => self.adc(AddressMode::IndirectY),
             0x7e => self.ror(AddressMode::AbsoluteX),
             0x84 => self.sty(AddressMode::ZeroPage),
             0x85 => self.sta(AddressMode::ZeroPage),
@@ -328,9 +329,62 @@ impl ExecutionContext {
     }
 
     fn adc(&mut self, mode: AddressMode) {
-        let mem = self.read(self.cpu.reg.pc) as u16;
+        let pc = self.cpu.reg.pc;
+        let value: u16 = match mode {
+            AddressMode::ZeroPage => {
+                self.adv_pc(2);
+                self.adv_cycles(3);
+                self.read_word(pc + 1) & 0xff
+            }
+            AddressMode::ZeroPageX => {
+                self.adv_pc(2);
+                self.adv_cycles(4);
+                self.read(pc + 2) as u16 & 0xff + self.cpu.reg.x as u16
+            }
+            AddressMode::Immediate => {
+                self.adv_pc(2);
+                self.adv_cycles(2);
+                self.read(pc) as u16
+            }
+            AddressMode::Absolute => {
+                self.adv_pc(3);
+                self.adv_cycles(4);
+                self.read_word(pc + 1) as u16
+            }
+            AddressMode::AbsoluteX => {
+                self.adv_pc(3);
+                self.adv_cycles(4);
+                let data = self.read_word(pc + 1) + self.cpu.reg.x as u16;
+                if (data - self.cpu.reg.x as u16) & 0xff00 != data & 0xff00 { self.adv_cycles(1); }
+                data
+            }
+            AddressMode::AbsoluteY => {
+                // TODO Check if this is a valid addressing mode
+                self.adv_pc(3);
+                let data = self.read_word(pc + 1) + self.cpu.reg.y as u16;
+                if (data - self.cpu.reg.y as u16) & 0xff00 != data & 0xff00 { self.adv_cycles(1); }
+                self.adv_cycles(4);
+                data
+            }
+            AddressMode::IndirectX => {
+                self.adv_pc(2);
+                self.adv_cycles(6);
+                self.read(pc) as u16
+            }
+            AddressMode::IndirectY => {
+                self.adv_cycles(4);
+                self.adv_pc(3);
+                let data = self.read(pc + 1) + self.cpu.reg.y & 0xff;
+                let addr = (self.read(data as u16) as u16 | self.read(data as u16 + 1) as u16) << 8;
+                let value = self.read(addr as u16);
+                if (data as u16 - self.cpu.reg.y as u16) & 0xff00 != data as u16 & 0xff00 { self.adv_cycles(1); }
+                value as u16
+            }
+            _ => unimplemented!("ADC address mode not supported {:?}", mode),
+        };
+
         let a = self.cpu.reg.a as u16;
-        let (result, overflow) = a.overflowing_add(mem.wrapping_add(self.cpu.flags.carry as u16));
+        let (result, overflow) = a.overflowing_add(value.wrapping_add(self.cpu.flags.carry as u16));
         self.cpu.reg.a = result as u8;
 
         self.cpu.flags.carry = (self.cpu.reg.a & 0x01) != 0;
@@ -338,45 +392,6 @@ impl ExecutionContext {
         self.cpu.flags.zero = (self.cpu.reg.a & 0xff) == 0;
         // Set to 1 if last ADC resulted in a signed overflow
         self.cpu.flags.overflow = overflow;
-
-        match mode {
-            AddressMode::ZeroPage => {
-                self.adv_pc(2);
-                self.adv_cycles(3);
-            }
-            AddressMode::ZeroPageX => {
-                self.adv_pc(2);
-                self.adv_cycles(4);
-            }
-            AddressMode::Immediate => {
-                self.adv_pc(2);
-                self.adv_cycles(2);
-            }
-            AddressMode::Absolute => {
-                self.adv_pc(3);
-                self.adv_cycles(4);
-            }
-            AddressMode::AbsoluteX => {
-                if (result - self.cpu.reg.x as u16) & 0xff00 != result & 0xff00 { self.adv_cycles(1); }
-                self.adv_pc(3);
-                self.adv_cycles(4);
-            }
-            AddressMode::AbsoluteY => {
-                self.adv_pc(3);
-                if (result - self.cpu.reg.y as u16) & 0xff00 != result & 0xff00 { self.adv_cycles(1); }
-                self.adv_cycles(4);
-            }
-            AddressMode::IndirectX => {
-                self.adv_pc(2);
-                self.adv_cycles(6);
-            }
-            AddressMode::IndirectY => {
-                self.adv_pc(2);
-                if (result - self.cpu.reg.y as u16) & 0xff00 != result & 0xff00 { self.adv_cycles(1); }
-                self.adv_cycles(5);
-            }
-            _ => unimplemented!("ADC address mode not supported {:?}", mode),
-        }
     }
     // ASL (Accumulator) helper function for ASL Accumulator
     fn asla(&mut self) {
@@ -430,7 +445,6 @@ impl ExecutionContext {
         self.cpu.flags.zero = (value & 0xff) == 0;
     }
 
-    // TODO Handle page boundary crossing
     fn and(&mut self, mode: AddressMode) {
         let pc = self.cpu.reg.pc;
         let data: u16 = match mode {
@@ -642,10 +656,6 @@ impl ExecutionContext {
     fn cmp(&mut self, mode: AddressMode) {
         let pc = self.cpu.reg.pc;
         let a = self.cpu.reg.a as u16;
-
-        // TODO Handle page boundary cycles for ABS X, Y & Indirect X & Y addressing modes
-        // The 6502 groups memory into two 256 byte pages, e.g if accessing memory is spread across
-        // two of these pages, an extra cycle is used to perform this operation.
 
         let result: u16 = match mode {
             AddressMode::ZeroPage => {

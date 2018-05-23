@@ -139,6 +139,7 @@ impl Instruction {
             0x72 => "NOP            ",
             0x73 => "NOP            ",
             0x78 => "SEI            ",
+            0x79 => "ADC Indirect Y ",
             0x7e => "ROR Absolute X ",
             0x84 => "STY Zero Page  ",
             0x85 => "STA Zero Page  ",
