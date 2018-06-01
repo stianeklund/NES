@@ -1027,8 +1027,6 @@ impl ExecutionContext {
         self.cpu.flags.negative = (result & 0x80) != 0;
     }
     fn ldx(&mut self, mode: AddressMode) {
-        // TODO Handle page boundary crossing
-        // + 1 cycle if page boundary is crossed
         let pc = self.cpu.reg.pc;
         let result: u16 = match mode {
             AddressMode::Absolute => {
@@ -1642,23 +1640,24 @@ impl ExecutionContext {
     }
     fn stx(&mut self, mode: AddressMode) {
         // Ex: Absolute: STA $4400 Hex: $8D Len: 3 Cycles:4
+        let pc = self.cpu.reg.pc;
         match mode {
             AddressMode::Absolute => {
-                let addr = self.read_word(self.cpu.reg.pc + 1);
+                let addr = self.read_word(pc + 1);
                 // Write value of accumulator to memory address
                 self.write(addr, self.cpu.reg.x);
                 self.adv_cycles(4);
                 self.adv_pc(3);
             }
             AddressMode::ZeroPage => {
-                let addr = self.read_word(self.cpu.reg.pc + 1) & 0xff;
+                let addr = self.read_word(pc + 1) & 0xff;
                 // Write value of accumulator to memory address
                 self.write(addr, self.cpu.reg.x);
                 self.adv_cycles(3);
                 self.adv_pc(2);
             }
             AddressMode::ZeroPageX => {
-                let data = self.read_word(self.cpu.reg.pc + 1) & 0xff + self.cpu.reg.x as u16;
+                let data = self.read_word(pc + 1) & 0xff + self.cpu.reg.x as u16;
                 self.write(data, self.cpu.reg.x);
                 self.cpu.flags.zero = (data & 0xff) == 0;
                 self.cpu.flags.negative = (data & 0x80) != 0;
@@ -1666,7 +1665,7 @@ impl ExecutionContext {
                 self.adv_pc(2);
             }
             AddressMode::ZeroPageY => {
-                let data = self.read_word(self.cpu.reg.pc + 1) & 0xff + self.cpu.reg.y as u16;
+                let data = self.read_word(pc + 1) & 0xff + self.cpu.reg.y as u16;
                 self.write(data, self.cpu.reg.y);
                 self.cpu.flags.zero = (data & 0xff) == 0;
                 self.cpu.flags.negative = (data & 0x80) != 0;
@@ -1710,13 +1709,18 @@ impl ExecutionContext {
     }
     // Transfer X to Stack Pointer
     fn txs(&mut self) {
-        self.push_byte(self.cpu.reg.x);
-        // self.cpu.reg.sp = self.cpu.reg.x;
+        let src = self.cpu.reg.x;
+        self.cpu.flags.negative = (src & 0x80) != 0;
+        self.cpu.flags.zero = (src & 0xff) != 0;
+        self.cpu.reg.sp = self.cpu.reg.x;
         self.adv_pc(1);
         self.adv_cycles(2);
     }
     // Transfer Stack Pointer to X
     fn tsx(&mut self) {
+        let src = self.cpu.reg.sp;
+        self.cpu.flags.negative = (src & 0x80) != 0;
+        self.cpu.flags.zero = (src & 0xff) != 0;
         self.cpu.reg.x = self.cpu.reg.sp;
         self.adv_pc(1);
         self.adv_cycles(2);
