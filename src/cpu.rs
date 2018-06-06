@@ -8,6 +8,7 @@ use apu::Apu;
 
 impl MemoryMapper for ExecutionContext {
     fn read(&self, addr: u16) -> u8 {
+
         match addr {
             // See https://wiki.nesdev.com/w/index.php/CPU_memory_map
             0...0x07ff => self.ram.memory[addr as usize] as u8,
@@ -26,7 +27,6 @@ impl MemoryMapper for ExecutionContext {
             },
             _ => unimplemented!("Reads to {:04x} is not implemented", addr),
         }
-
     }
 
     fn write(&mut self, addr: u16, byte: u8) {
@@ -45,17 +45,14 @@ impl MemoryMapper for ExecutionContext {
                 // Many CPU tests just store ASCII characters in SRAM
                 // Output as characters when writing to SRAM
                 self.ram.sram[addr as usize] = byte;
-                // TODO Remove hack
+                // Print contents of work ram
                 let output = self.ram.sram[addr as usize];
-                if output.is_ascii() {
-                    println!("{}", output as char);
-                }
+                println!("{}", output as char);
             },
             0x8000...0xffff => self.cart.prg[addr as usize & 0x3fff] = byte,
             _ => eprintln!("Trying to write to memory address {:04x}", addr),
         };
-
-
+        println!("Writing {:04x} to ${:04x}", byte, addr);
     }
 }
 
@@ -63,7 +60,7 @@ impl MemoryMapper for ExecutionContext {
 pub struct StatusRegister {
     negative: bool,
     overflow: bool,
-    bit5: bool,
+    reserved: bool,
     brk: bool,
     decimal: bool,
     interrupt: bool,
@@ -79,7 +76,6 @@ pub struct Registers {
     pub a: u8,
     pub x: u8,
     pub y: u8,
-    pub status: u8,
 }
 
 impl Registers {
@@ -91,7 +87,6 @@ impl Registers {
             a: 0,
             x: 0,
             y: 0,
-            status: 0,
         }
     }
 }
@@ -124,12 +119,11 @@ impl Cpu {
                 a: 0,
                 x: 0,
                 y: 0,
-                status: 0,
             },
             flags: StatusRegister {
                 negative: false,
                 overflow: false,
-                bit5: true,
+                reserved: true,
                 brk: false,
                 decimal: false,
                 interrupt: false,
@@ -178,7 +172,9 @@ impl ExecutionContext {
 
     pub fn decode(&mut self) {
         let opcode = self.read(self.cpu.reg.pc);
-
+        println!("{}", Instruction::mnemonic(opcode));
+        // Debug print CPU values
+        println!("{:?}", self.cpu);
         match opcode {
             0x00 => self.brk(),
             0x01 => self.bpl(),
@@ -275,6 +271,7 @@ impl ExecutionContext {
             0x85 => self.sta(AddressMode::ZeroPage),
             0x86 => self.stx(AddressMode::ZeroPage),
             0x88 => self.dey(),
+            0x8c => self.sty(AddressMode::Absolute),
             0x8d => self.sta(AddressMode::Absolute),
             0x8e => self.stx(AddressMode::Absolute),
             0x90 => self.bcc(),
@@ -322,10 +319,6 @@ impl ExecutionContext {
         }
         self.cpu.opcode = opcode as u8;
         self.cpu.reg.prev_pc = self.cpu.reg.pc;
-
-        println!("{}", Instruction::mnemonic(opcode));
-        // Debug print CPU values
-        println!("{:?}", self.cpu);
     }
 
     fn adc(&mut self, mode: AddressMode) {
@@ -1383,7 +1376,7 @@ impl ExecutionContext {
         // self.cpu.flags.overflow = result & 0x40;
     }
     fn rts(&mut self) {
-        self.pull_byte(self.cpu.reg.sp);
+        self.pop_byte();
         let value = self.cpu.reg.sp as u16;
 
         // Set program counter for debug output
@@ -1396,7 +1389,7 @@ impl ExecutionContext {
     // Return from interrupt
     fn rti(&mut self) {
         // Pull processor flags from stack
-        self.pull_byte(self.cpu.reg.sp);
+        self.pop_byte();
         let sp = self.cpu.reg.sp;
 
         // TODO Check bitmask
@@ -1572,9 +1565,10 @@ impl ExecutionContext {
         // Ex: Absolute: STA $4400 Hex: $8D Len: 3 Cycles:4
         let pc = self.cpu.reg.pc;
         let a = self.cpu.reg.a;
+
         match mode {
             AddressMode::Absolute => {
-                let addr = self.read_word(pc + 1);
+               let addr = self.read_word(pc + 1);
                 // Write value of accumulator to memory address
                 self.write(addr, a);
                 self.adv_cycles(4);
@@ -1619,18 +1613,17 @@ impl ExecutionContext {
     }
     fn sty(&mut self, mode: AddressMode) {
         // Ex: Absolute: STA $4400 Hex: $8D Len: 3 Cycles:4
+        let pc = self.cpu.reg.pc;
+        let y = self.cpu.reg.y;
         match mode {
             AddressMode::Absolute => {
-                let addr = self.read_word(self.cpu.reg.pc + 1);
-                let y = self.cpu.reg.y;
+                let addr = self.read_word(pc + 1);
                 self.write(addr, y);
-                self.adv_pc(2);
+                self.adv_pc(3);
                 self.adv_cycles(3);
             },
             AddressMode::ZeroPage => {
-                let addr = self.read_word(self.cpu.reg.pc + 1);
-                let y = self.cpu.reg.y;
-                // Write value of accumulator to memory address
+                let addr = self.read_word(pc + 1) & 0xff;
                 self.write(addr, y);
                 self.adv_pc(2);
                 self.adv_cycles(3);
@@ -1736,10 +1729,11 @@ impl ExecutionContext {
         self.write(0x100 + sp as u16, byte);
         self.cpu.reg.sp = self.cpu.reg.sp.wrapping_sub(1);
     }
-    fn pull_byte(&mut self, byte: u8) {
+    fn pop_byte(&mut self) -> u8 {
         let sp = self.cpu.reg.sp;
-        self.write(0x100 + sp as u16, byte);
-        self.cpu.reg.sp = self.cpu.reg.sp.wrapping_add(1);
+        self.cpu.reg.sp = sp.wrapping_add(1);
+        let value = self.read(0x100 + sp as u16);
+        value
     }
     // Push accumulator
     fn pha(&mut self) {
@@ -1747,17 +1741,31 @@ impl ExecutionContext {
         self.adv_pc(1);
         self.adv_cycles(3);
     }
+    fn get_status_flags(&mut self) -> u8 {
+        let ps = if self.cpu.flags.negative { 0x80 } else { 0x0 } |
+            if self.cpu.flags.overflow { 0x40 } else { 0x0 } |
+            if self.cpu.flags.reserved { 0x20 } else { 0x0 } |
+            if self.cpu.flags.brk { 0x10 } else { 0x0 } |
+            if self.cpu.flags.decimal { 0x08 } else { 0x0 } |
+            if self.cpu.flags.interrupt { 0x04 } else { 0x0 } |
+            if self.cpu.flags.zero { 0x02 } else { 0x0 } |
+            if self.cpu.flags.carry { 0x01 } else { 0x0 };
+        ps
+    }
+    fn set_status_flags(&mut self, value: u8) {
+        self.cpu.flags.negative = value & 0x80 == 0x80;
+        self.cpu.flags.overflow = value & 0x40 == 0x40;
+        self.cpu.flags.reserved = value & 0x20 == 0x20;
+        self.cpu.flags.brk = value & 0x10 == 0x10;
+        self.cpu.flags.decimal = value & 0x08 == 0x08;
+        self.cpu.flags.interrupt = value & 0x04 == 0x04;
+        self.cpu.flags.zero = value & 0x02 == 0x02;
+        self.cpu.flags.carry = value & 0x01 == 0x01;
+    }
     // Push Processor Status
     fn php(&mut self) {
         // Pushes a copy of the status flags to the stack
-
-        // TODO Check order
-        let ps = if self.cpu.flags.negative { 0x80 } else { 0x0 } |
-            if self.cpu.flags.zero { 0x40 } else { 0x0 } |
-            if self.cpu.flags.carry { 0x10 } else { 0x0 } | 0x02 |
-            if self.cpu.flags.interrupt { 0x04 } else { 0x0 } |
-            if self.cpu.flags.decimal { 0x01 } else { 0x0 };
-
+        let ps = self.get_status_flags();
         self.push_byte(ps);
         self.adv_pc(1);
         self.adv_cycles(3);
@@ -1767,29 +1775,16 @@ impl ExecutionContext {
     fn pla(&mut self) {
         // Pulls an 8-bit value from the stack and into the accumulator.
         // Flags affected zero & negative
-        //  self.cpu.reg.sp + 1;
-        self.pull_byte(self.cpu.reg.sp);
-        let value = self.cpu.reg.sp;
+        let value = self.pop_byte();
         self.cpu.flags.zero = (value & 0xff) == 0;
         self.cpu.flags.negative = (value & 0x80) != 0;
-
         self.cpu.reg.a = value;
         self.adv_pc(1);
         self.adv_cycles(4);
     }
     fn plp(&mut self) {
-        // Pulls status flags from the stack and assigns them to each respective CPU flag
-
-        self.pull_byte(self.cpu.reg.sp);
-        let value = self.cpu.reg.sp;
-
-        // TODO Check order
-        self.cpu.flags.negative = value & 0x80 != 0;
-        self.cpu.flags.zero = value & 0x40 != 0;
-        self.cpu.flags.carry = value & 0x10 != 0;
-        self.cpu.flags.interrupt = value & 0x04 != 0;
-        self.cpu.flags.decimal = value & 0x01 != 0;
-
+        let status = self.pop_byte();
+        self.set_status_flags(status);
         self.adv_pc(1);
         self.adv_cycles(4);
     }
@@ -1918,14 +1913,14 @@ impl ExecutionContext {
             }
             _ => unimplemented!("Mode not supported {:?}", mode)
         };
+
         self.cpu.flags.zero = (result & 0xff) == 0;
         self.cpu.flags.negative = (result & 0x80) != 0;
         self.cpu.reg.a = result as u8;
     }
-    // Reset CPU to initial powerup state
+    // Reset CPU to initial power up state
     pub fn reset(&mut self) {
         // TODO PPU reset
-
         // Read reset vector
         self.cpu.reg.pc = self.read_word(0xfffc);
         self.cpu.reg.sp = 0xfd;
