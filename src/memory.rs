@@ -32,7 +32,7 @@ impl LowerHex for Ram {
 }
 impl Debug for Ram {
     fn fmt(&self, f: &mut Formatter) -> Result {
-        let value = self;
+    let value = self;
         write!(f, "{:?}", value)
     }
 }

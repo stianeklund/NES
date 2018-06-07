@@ -553,6 +553,7 @@ impl ExecutionContext {
     // Branch on Plus (if positive)
     fn bpl(&mut self) {
         // Cycles 3+ / 2
+        // TODO with test rom we end up at STA but should be at next instruction STX
         if !self.cpu.flags.negative {
             let offset = self.read(self.cpu.reg.pc + 1) as i8 as u16;
             self.cpu.reg.prev_pc = self.cpu.reg.pc;
@@ -1634,24 +1635,25 @@ impl ExecutionContext {
     fn stx(&mut self, mode: AddressMode) {
         // Ex: Absolute: STA $4400 Hex: $8D Len: 3 Cycles:4
         let pc = self.cpu.reg.pc;
+        let x = self.cpu.reg.x;
         match mode {
             AddressMode::Absolute => {
                 let addr = self.read_word(pc + 1);
                 // Write value of accumulator to memory address
-                self.write(addr, self.cpu.reg.x);
+                self.write(addr, x);
                 self.adv_cycles(4);
                 self.adv_pc(3);
             }
             AddressMode::ZeroPage => {
                 let addr = self.read_word(pc + 1) & 0xff;
                 // Write value of accumulator to memory address
-                self.write(addr, self.cpu.reg.x);
+                self.write(addr, x);
                 self.adv_cycles(3);
                 self.adv_pc(2);
             }
             AddressMode::ZeroPageX => {
                 let data = self.read_word(pc + 1) & 0xff + self.cpu.reg.x as u16;
-                self.write(data, self.cpu.reg.x);
+                self.write(data, x);
                 self.cpu.flags.zero = (data & 0xff) == 0;
                 self.cpu.flags.negative = (data & 0x80) != 0;
                 self.adv_cycles(2);
@@ -1726,14 +1728,14 @@ impl ExecutionContext {
     // Push register
     fn push_byte(&mut self, byte: u8) {
         let sp = self.cpu.reg.sp;
-        self.write(0x100 + sp as u16, byte);
         self.cpu.reg.sp = self.cpu.reg.sp.wrapping_sub(1);
+        self.write(0x100 | sp as u16, byte);
     }
+    // Pull
     fn pop_byte(&mut self) -> u8 {
         let sp = self.cpu.reg.sp;
         self.cpu.reg.sp = sp.wrapping_add(1);
-        let value = self.read(0x100 + sp as u16);
-        value
+        self.read(0x100 | sp as u16)
     }
     // Push accumulator
     fn pha(&mut self) {
