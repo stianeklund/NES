@@ -7,12 +7,14 @@ use apu::Apu;
 use std::fmt;
 
 impl MemoryMapper for ExecutionContext {
-    fn read(&self, addr: u16) -> u8 {
+    fn read(&mut self, addr: u16) -> u8 {
+        // println!("CPU Read ${:04x}", addr);
+        self.adv_cycles(1);
 
-        self.cpu.cycles.wrapping_add(1);
+        // See https://wiki.nesdev.com/w/index.php/CPU_memory_map
         match addr {
-            // See https://wiki.nesdev.com/w/index.php/CPU_memory_map
             0...0x07ff => self.ram.memory[addr as usize] as u8,
+            0x0800 ... 0x1fff => self.ram.memory[addr as usize & 0x07ff],
             0x2000 ... 0x3fff => self.ppu.read(addr),
             0x4000 ... 0x4017 => self.apu.read(addr),
             // $6000-$7FFF = Battery Backed Save or Work RAM
@@ -26,7 +28,7 @@ impl MemoryMapper for ExecutionContext {
                 }
                 self.cart.prg[addr as usize & mask_amount]
             },
-            _ => unimplemented!("Reads to {:04x} is not implemented", addr),
+            _ => unimplemented!("Reads to ${:04x} is not implemented", addr),
         }
     }
 
@@ -254,7 +256,8 @@ impl ExecutionContext {
         }
     }
     pub fn decode(&mut self) {
-        let opcode = self.read(self.cpu.reg.pc);
+        let imm = self.imm();
+        let opcode = self.read(imm);
         println!("{}", Instruction::mnemonic(opcode));
         // Debug print CPU values
         println!("{:?}", self.cpu);
@@ -429,8 +432,6 @@ impl ExecutionContext {
         self.cpu.flags.carry = data >> 1 & 0xfe != 0;
         self.cpu.flags.negative;
         self.cpu.reg.a = data as u8;
-        self.adv_pc(1);
-        self.adv_cycles(2);
     }
 
     // Arithmetic shift left
@@ -523,9 +524,7 @@ impl ExecutionContext {
     fn brk(&mut self) {
         self.cpu.flags.brk = true;
         self.push_word(self.cpu.reg.pc + 1);
-        self.adv_pc(2);
         self.cpu.reg.pc = self.read16(0xfffe);
-        self.adv_cycles(7);
     }
     // Test Bits N Z V
     fn bit(&mut self, value: u16) {
@@ -561,26 +560,18 @@ impl ExecutionContext {
     // Clear carry
     fn clc(&mut self) {
         self.cpu.flags.carry = false;
-        self.adv_pc(1);
-        self.adv_cycles(2);
     }
     // Clear decimal
     fn cld(&mut self) {
         self.cpu.flags.decimal = false;
-        self.adv_pc(1);
-        self.adv_cycles(2);
     }
     // Clear Interrupt Disable
     fn cli(&mut self) {
         self.cpu.flags.interrupt = false;
-        self.adv_pc(1);
-        self.adv_cycles(2);
     }
     // Clear overflow
     fn clv(&mut self) {
         self.cpu.flags.overflow = false;
-        self.adv_pc(1);
-        self.adv_cycles(2);
     }
     // Compare with accumulator
     fn cmp(&mut self, value: u16) {
@@ -613,31 +604,23 @@ impl ExecutionContext {
         self.cpu.reg.y = self.cpu.reg.y.wrapping_sub(1);
         self.cpu.flags.negative = (self.cpu.reg.y & 0x80) != 0;
         self.cpu.flags.zero = self.cpu.reg.y & 0xff == 0;
-        self.adv_cycles(2);
-        self.adv_pc(1);
     }
     // Decrement X register
     fn dex(&mut self) {
         self.cpu.reg.x = self.cpu.reg.x.wrapping_sub(1);
         self.cpu.flags.negative = (self.cpu.reg.x & 0x80) != 0;
         self.cpu.flags.zero = self.cpu.reg.x & 0xff == 0;
-        self.adv_cycles(2);
-        self.adv_pc(1);
     }
     // Decrement & compare
     fn dcp(&mut self) {
         println!("DCP (illegal opcode)");
         let data = self.read(self.cpu.reg.pc + 2);
-        self.adv_pc(2);
-        self.adv_cycles(7);
         unimplemented!();
     }
     // Double NOP
     fn dop(&mut self, mode: AddressMode) {
         match mode {
             AddressMode::ZeroPage => {
-                self.adv_cycles(3);
-                self.adv_pc(2)
             },
             AddressMode::ZeroPageX => {},
             AddressMode::ZeroPageY => {},
@@ -704,8 +687,6 @@ impl ExecutionContext {
         self.cpu.flags.negative = (self.cpu.reg.a & 0x80) != 0;
         self.cpu.flags.zero = (self.cpu.reg.a & 0xff) == 0;
         self.cpu.flags.carry = carry;
-        self.adv_pc(1);
-        self.adv_cycles(2);
     }
     fn nop(&mut self) { self.bump(1,2); }
     fn ora(&mut self, value: u16) {
@@ -722,8 +703,6 @@ impl ExecutionContext {
         self.cpu.flags.negative = (result & 0x80) != 0;
         self.cpu.flags.zero = (result & 0xff) == 0;
         self.cpu.flags.carry = (result & 0x01) != 0;
-        self.adv_cycles(2);
-        self.adv_pc(1);
     }
     // Rotate one bit right memory or accumulator
     fn rol(&mut self, value: u16) {
@@ -749,8 +728,6 @@ impl ExecutionContext {
         self.cpu.flags.negative = (result & 0x80) != 0;
         self.cpu.flags.zero = (result & 0xff) == 0;
         self.cpu.flags.carry = (result & 0x01) != 0;
-        self.adv_pc(1);
-        self.adv_cycles(2);
     }
     fn ror(&mut self, value: u16) {
         // TODO check if result is correct
@@ -780,13 +757,13 @@ impl ExecutionContext {
         self.cpu.reg.prev_pc = self.cpu.reg.pc;
         self.cpu.reg.pc = ((value << 8) - 1) as u16;
         // self.cpu.reg.sp = sp.wrapping_add(2) as u8;
-        self.adv_pc(1);
-        self.adv_cycles(6);
     }
     // Return from interrupt
+    // TODO investigate
     fn rti(&mut self) {
         // Pull processor flags from stack
-        self.pop_byte();
+        let addr = self.pop16();
+        self.cpu.reg.pc = addr;
         let sp = self.cpu.reg.sp;
 
         // TODO Check bitmask
@@ -795,14 +772,10 @@ impl ExecutionContext {
         self.cpu.flags.carry = sp & 0x10 != 0;
         self.cpu.flags.interrupt = sp & 0x04 != 0;
         self.cpu.flags.decimal = sp & 0x01 != 0;
-
-        self.adv_pc(1);
-        self.adv_cycles(6);
+        // self.adv_cycles(6);
     }
     fn sed(&mut self) {
         self.cpu.flags.decimal = true;
-        self.adv_pc(1);
-        self.adv_cycles(2);
     }
 
     fn sbc(&mut self, value: u16) {
@@ -823,8 +796,6 @@ impl ExecutionContext {
         self.cpu.reg.a |= value;
         self.cpu.flags.carry = value & 0x80 != 0;
         self.cpu.flags.zero = value & 0xff == 0;
-        self.adv_pc(1);
-        self.adv_cycles(2);
     }
     // Shift left one bit in memory, then OR the result with the accumulator
     // Part of undocumented opcodes
@@ -844,32 +815,24 @@ impl ExecutionContext {
         self.cpu.reg.x = self.cpu.reg.a;
         self.cpu.flags.zero = (self.cpu.reg.x & 0xff) == 0;
         self.cpu.flags.negative = (self.cpu.reg.x & 0x80) != 0;
-        self.adv_pc(1);
-        self.adv_cycles(2);
     }
     // Transfer Y to Accumulator
     fn tay(&mut self) {
         self.cpu.reg.y = self.cpu.reg.a;
         self.cpu.flags.zero = (self.cpu.reg.y & 0xff) == 0;
         self.cpu.flags.negative = (self.cpu.reg.y & 0x80) != 0;
-        self.adv_pc(1);
-        self.adv_cycles(2);
     }
     // Transfer Y to Accumulator
     fn tya(&mut self) {
         self.cpu.reg.a = self.cpu.reg.y;
         self.cpu.flags.zero = (self.cpu.reg.a & 0xff) == 0;
         self.cpu.flags.negative = (self.cpu.reg.a & 0x80) != 0;
-        self.adv_pc(1);
-        self.adv_cycles(2);
     }
     // Transfer X to Accumulator
     fn txa(&mut self) {
         self.cpu.reg.a = self.cpu.reg.x;
         self.cpu.flags.zero = (self.cpu.reg.a & 0xff) == 0;
         self.cpu.flags.negative = (self.cpu.reg.a & 0x80) != 0;
-        self.adv_pc(1);
-        self.adv_cycles(2);
     }
     // Transfer X to Stack Pointer
     fn txs(&mut self) {
@@ -877,8 +840,6 @@ impl ExecutionContext {
         self.cpu.flags.negative = (src & 0x80) != 0;
         self.cpu.flags.zero = (src & 0xff) != 0;
         self.cpu.reg.sp = self.cpu.reg.x;
-        self.adv_pc(1);
-        self.adv_cycles(2);
     }
     // Transfer Stack Pointer to X
     fn tsx(&mut self) {
@@ -886,8 +847,6 @@ impl ExecutionContext {
         self.cpu.flags.negative = (src & 0x80) != 0;
         self.cpu.flags.zero = (src & 0xff) != 0;
         self.cpu.reg.x = self.cpu.reg.sp;
-        self.adv_pc(1);
-        self.adv_cycles(2);
     }
     fn push_word(&mut self, value: u16) {
         let sp = self.cpu.reg.sp;
@@ -906,12 +865,11 @@ impl ExecutionContext {
         self.cpu.reg.sp = sp.wrapping_add(1);
         self.read(0x100 | sp as u16)
     }
-    // Push accumulator
-    fn pha(&mut self) {
-        self.push_byte(self.cpu.reg.a);
-        self.adv_pc(1);
-        self.adv_cycles(3);
+    fn pop16(&mut self) -> u16 {
+        ((self.pop_byte() as u16) | (self.pop_byte() as u16) << 8)
     }
+    // Push accumulator
+    fn pha(&mut self) { self.push_byte(self.cpu.reg.a); }
     fn get_status_flags(&mut self) -> u8 {
         let ps = if self.cpu.flags.negative { 0x80 } else { 0x0 } |
             if self.cpu.flags.overflow { 0x40 } else { 0x0 } |
@@ -938,8 +896,6 @@ impl ExecutionContext {
         // Pushes a copy of the status flags to the stack
         let ps = self.get_status_flags();
         self.push_byte(ps);
-        self.adv_pc(1);
-        self.adv_cycles(3);
     }
 
     // PuL1 (POP) Accumulator
@@ -950,14 +906,10 @@ impl ExecutionContext {
         self.cpu.flags.zero = (value & 0xff) == 0;
         self.cpu.flags.negative = (value & 0x80) != 0;
         self.cpu.reg.a = value;
-        self.adv_pc(1);
-        self.adv_cycles(4);
     }
     fn plp(&mut self) {
         let status = self.pop_byte();
         self.set_status_flags(status);
-        self.adv_pc(1);
-        self.adv_cycles(4);
     }
     // Increment Memory
     fn inc(&mut self, value: u16) {
@@ -986,21 +938,19 @@ impl ExecutionContext {
         // Sometimes called TOP (triple-byte no-op), SKW (skip word), DOP (double-byte no-op), or SKB (skip byte).
         let addr = self.cpu.reg.pc + 1;
         self.read(addr);
-        self.adv_pc(1);
-        self.adv_cycles(2);
     }
 
     // Jump to Subroutine
     fn jsr(&mut self) {
         self.cpu.reg.prev_pc = self.cpu.reg.pc;
         let addr = self.read16(self.cpu.reg.pc + 1);
-        self.adv_pc(3);
+        // self.adv_pc(3);
 
         // Push to stack
         let pc = self.cpu.reg.pc;
         self.cpu.reg.prev_pc = self.cpu.reg.pc;
         self.push_word(pc - 1);
-        self.adv_cycles(3); // 6 if no jump?
+        // self.adv_cycles(3); // 6 if no jump?
         self.cpu.reg.pc = addr;
     }
     fn jmp(&mut self, mode: AddressMode) {
@@ -1017,11 +967,7 @@ impl ExecutionContext {
         self.adv_cycles(2);
         self.adv_pc(1);
     }
-    fn sei(&mut self) {
-        self.cpu.flags.interrupt = true;
-        self.adv_pc(1);
-        self.adv_cycles(2);
-    }
+    fn sei(&mut self) { self.cpu.flags.interrupt = true; }
     // ISC (Increase memory by one)
     fn isc(&mut self, mode: AddressMode) {
         let result = match mode {

@@ -88,7 +88,7 @@ impl Ppu {
 // The PPU addresses a 16kB space, $0000-3FFF.
 // TODO Improve mapper to handle writes to registers that have write enable
 impl MemoryMapper for Ppu {
-        fn read(&self, addr: u16) -> u8 {
+        fn read(&mut self, addr: u16) -> u8 {
             println!("PPU Read ${:04x}", addr);
             self.cycles.wrapping_add(1);
         match addr {

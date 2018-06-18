@@ -20,11 +20,14 @@ pub struct Registers {
     dmc: u8,
     control: u8,
     status: u8,
-    frame_counter: u8
+    frame_counter: u8,
+    cycles: u8,
 }
 
 impl MemoryMapper for Apu {
-    fn read(&self, addr: u16) -> u8 {
+    fn read(&mut self, addr: u16) -> u8 {
+        self.reg.cycles = self.reg.cycles.wrapping_add(1);
+
         match addr {
             0x4000 ... 0x4003 => self.reg.pulse_1,
             0x4004 ... 0x4007 => self.reg.pulse_2,
@@ -37,6 +40,8 @@ impl MemoryMapper for Apu {
         }
     }
     fn write(&mut self, addr: u16, byte: u8) {
+        self.reg.cycles = self.reg.cycles.wrapping_add(1);
+
         match addr {
             0x4000 ... 0x4003 => self.reg.pulse_1 = byte,
             0x4004 ... 0x4007 => self.reg.pulse_2 = byte,
