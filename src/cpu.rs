@@ -203,7 +203,7 @@ impl ExecutionContext {
     }
     pub fn zpx(&mut self) -> u16 {
         let imm = self.imm();
-        (self.read(imm & 0xff) + self.cpu.reg.x) as u16
+        (self.read(imm & 0xff) as u16 + self.cpu.reg.x as u16)
     }
     pub fn zpy(&mut self) -> u16 {
         let imm = self.imm();
@@ -265,6 +265,7 @@ impl ExecutionContext {
         match opcode {
             0x00 => self.brk(),
             0x01 => self.bpl(),
+            0x02 => ::std::process::exit(0x100),
             0x03 => { m = self.indirect_indx().0; self.slo(m); },
             0x04 => self.rti(),
             0x05 => { m = self.zp(); self.ora(m); },
@@ -274,9 +275,12 @@ impl ExecutionContext {
             0x09 => { m = self.imm(); self.ora(m); },
             0x10 => self.bpl(),
             0x13 => { m = self.indirect_indx().0; self.slo(m); },
+            0x15 => { m = self.zpx(); self.ora(m); },
             0x16 => { m = self.zp(); self.asl(m); },
             0x17 => { m = self.zp(); self.slo(m); },
+            0x18 => self.clc(),
             0x1b => { m = self.absy().0; self.slo(m); },
+            0x1c => self.nop(),
             0x1f => { m = self.abs(); self.slo(m); },
             0x0c => self.nop(),
             0x0e => { m = self.abs(); self.asl(m); },
