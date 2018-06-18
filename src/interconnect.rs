@@ -5,7 +5,7 @@ use ppu::Ppu;
 
 pub trait MemoryMapper {
     fn read(&self, addr: u16) -> u8 ;
-    fn read_word(&self, addr: u16) -> u16 {
+    fn read16(&self, addr: u16) -> u16 {
         (self.read(addr) as u16) | (self.read(addr + 1) as u16) << 8
     }
     fn write(&mut self, addr: u16, byte: u8);
@@ -14,7 +14,6 @@ pub trait MemoryMapper {
         self.write(addr + 1, (word >> 8) as u8);
     }
 }
-
 pub struct Interconnect {
     pub cart: Cartridge,
     pub ram: Ram,
@@ -32,7 +31,8 @@ impl Interconnect {
     }
 }
 
-impl MemoryMapper for Interconnect {
+// TODO Remove, we don't need to implement mapping here
+/* impl MemoryMapper for Interconnect {
 
     // See https://wiki.nesdev.com/w/index.php/CPU_memory_map
     // TODO PPU address space
@@ -63,6 +63,7 @@ impl MemoryMapper for Interconnect {
 
     }
 
-}
+}*/
+
 
 

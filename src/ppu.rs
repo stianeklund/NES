@@ -4,6 +4,7 @@ pub struct Ppu {
     pub vram: Vec<u8>,
     pub addr: Vec<u16>,
     pub reg: Registers,
+    pub cycles: u8,
 }
 pub struct Registers {
     ppu_ctrl: u8,
@@ -80,6 +81,7 @@ impl Ppu {
             vram: vec![0; 16384],
             addr: vec![0u16],
             reg: Registers::default(),
+            cycles: 0,
         }
     }
 }
@@ -88,6 +90,7 @@ impl Ppu {
 impl MemoryMapper for Ppu {
         fn read(&self, addr: u16) -> u8 {
             println!("PPU Read ${:04x}", addr);
+            self.cycles.wrapping_add(1);
         match addr {
             0... 0x1fff => self.chr[addr as usize],
             // TODO PPU Mirror? Is PPU size to `$3fff`?

@@ -84,7 +84,7 @@ impl MemoryMapper for Cartridge {
             _ => panic!("Unrecognized read address: {:04x}", addr)
         }
     }
-    fn read_word(&self, addr: u16) -> u16 {
+    fn read16(&self, addr: u16) -> u16 {
         (self.read(addr) as u16) | ((self.read(addr + 1) as u16) << 8)
 
     }
