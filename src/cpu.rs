@@ -17,6 +17,7 @@ impl MemoryMapper for ExecutionContext {
             0x0800 ... 0x1fff => self.ram.memory[addr as usize & 0x07ff],
             0x2000 ... 0x3fff => self.ppu.read(addr),
             0x4000 ... 0x4017 => self.apu.read(addr),
+            0x4018 ... 0x401f => unimplemented!("Read to CPU Test space"),
             // $6000-$7FFF = Battery Backed Save or Work RAM
             0x6000 ... 0x7fff => self.ram.sram[addr as usize] as u8,
             0x8000...0xffff => {
@@ -232,11 +233,11 @@ impl ExecutionContext {
     // Indirect X
     pub fn indx_indirect(&mut self) -> (u16, bool) {
         let imm = self.imm();
-        let data = (self.read(imm) + (self.cpu.reg.x & 0xff)) as u8;
+        let data = (self.read(imm).wrapping_add((self.cpu.reg.x & 0xff)) as u8);
         // let addr = self.read(data as u16) | self.read((data + 1) as u16) << 8;
         let addr = self.read(data as u16) | self.read((data + 1) as u16).wrapping_shl(8);
         let value = (self.read(addr as u16) & 0xff) as u16;
-        if (value - self.cpu.reg.x as u16) & 0xff00 != value & 0xff00 {
+        if (value.wrapping_sub(self.cpu.reg.x as u16) & 0xff00) != value & 0xff00 {
             (value, true)
         } else {
             (value, false)
@@ -249,19 +250,24 @@ impl ExecutionContext {
         let data = self.read(imm) + self.cpu.reg.y & 0xff;
         let addr = (self.read(data as u16) as u16 | self.read(data as u16 + 1) as u16) << 8;
         let value: u16 = self.read(addr as u16) as u16;
-        if (value - self.cpu.reg.y as u16) & 0xff00 != value & 0xff00 {
+        if (value.wrapping_sub(self.cpu.reg.y as u16) & 0xff00) != value & 0xff00 {
             (value, true)
         } else {
             (value, false)
         }
     }
+    pub fn indirect(&mut self) -> u16 {
+        let abs = self.abs();
+        self.read16(abs) as u16
+    }
     pub fn decode(&mut self) {
         let imm = self.imm();
         let opcode = self.read(imm);
         println!("{}", Instruction::mnemonic(opcode));
+        self.cpu.opcode = opcode;
         // Debug print CPU values
         println!("{:?}", self.cpu);
-
+        self.cpu.reg.prev_pc = self.cpu.reg.pc;
 
         // Address mode
         let mut m;
@@ -270,7 +276,7 @@ impl ExecutionContext {
             0x01 => self.bpl(),
             0x02 => ::std::process::exit(0x100),
             0x03 => { m = self.indirect_indx().0; self.slo(m); },
-            0x04 => self.rti(),
+            0x04 => { m = self.read(self.cpu.reg.pc + 1) as u16; self.rti(m); },
             0x05 => { m = self.zp(); self.ora(m); },
             0x06 => { m = self.zp(); self.asl(m); },
             0x07 => { m = self.zp(); self.slo(m); },
@@ -301,7 +307,7 @@ impl ExecutionContext {
             0xad => { m = self.abs(); self.lda(m); },
             0xae => { m = self.abs(); self.ldx(m); },
             0xaf => { m = self.abs(); self.lax(m); },
-            0xb0 => self.bcs(),
+            0xb0 => { m = self.imm(); self.bcs(m); },
             0xb1 => { m = self.indirect_indx().0; self.lda(m); },
             0xb5 => { m = self.zp(); self.lda(m); },
             0xb6 => { m = self.zpy(); self.ldx(m); },
@@ -312,7 +318,9 @@ impl ExecutionContext {
             0xbd => { m = self.absx().0; self.lda(m); },
             0xbe => { m = self.absy().0; self.ldx(m); },
             0xc0 => { m = self.imm(); self.cpy(m); },
-            0x40 => self.rti(),
+            0xc1 => { m = self.indirect_indx().0; self.cmp(m); },
+            0xc5 => { m = self.zp(); self.cmp(m); },
+            0x40 => { m = self.read(self.cpu.reg.pc + 1) as u16; self.rti(m); },
             0x41 => { m = self.indirect_indx().0; self.eor(m); },
             0x4a => self.lsra(),
             0x4e => { m = self.abs(); self.lsr(m); },
@@ -325,7 +333,7 @@ impl ExecutionContext {
             0x2a => self.rola(),
             0x2c => { m = self.zp(); self.bit(m); },
             0x2e => { m = self.abs(); self.rol(m); },
-            0x20 => self.jsr(),
+            0x20 => { m = self.abs(); self.jsr(m); },
             0x21 => { m = self.indirect_indx().0; self.and(m); },
             0x24 => { m = self.zp(); self.bit(m); },
             0x29 => { m = self.imm(); self.and(m); },
@@ -335,8 +343,8 @@ impl ExecutionContext {
             0x36 => { m = self.zpx(); self.rol(m); },
             0x38 => self.sec(),
             0x3e => { m = self.absx().0; self.rol(m); },
-            0x4c => self.jmp(AddressMode::Absolute),
-            0x50 => self.bvs(),
+            0x4c => { m = self.abs(); self.jmp(m); },
+            0x50 => { m = self.imm(); self.bvc(m); },
             0x51 => { m = self.indx_indirect().0; self.eor(m); },
             0x54 => self.ign(),
             0x55 => { m = self.zpx(); self.eor(m); },
@@ -351,11 +359,11 @@ impl ExecutionContext {
             0x66 => { m = self.zp(); self.ror(m); },
             0x68 => self.pla(),
             0x6a => self.rora(),
-            0x6c => self.jmp(AddressMode::Indirect),
+            0x6c => { m = self.indirect(); self.jmp(m); },
             0x6d => { m = self.abs(); self.adc(m); },
             0x69 => { m = self.imm(); self.adc(m); },
             0x6e => { m = self.abs(); self.ror(m); },
-            0x70 => self.bvs(),
+            0x70 => { m = self.imm(); self.bvs(m); },
             0x72 => self.nop(),
             0x73 => self.nop(),
             0x78 => self.sei(),
@@ -382,7 +390,7 @@ impl ExecutionContext {
             0xca => self.dex(),
             0xce => { m = self.abs(); self.dec(m); },
             0xcc => { m = self.zp(); self.cpy(m); },
-            0xd0 => self.bne(),
+            0xd0 => { m = self.imm(); self.bne(m); },
             0xd2 => self.hlt(),
             0xd3 => self.dcp(),
             0xd6 => { m = self.zpx(); self.dec(m); },
@@ -391,6 +399,7 @@ impl ExecutionContext {
             0xde => { m = self.absx().0; self.dec(m); },
             0xdf => self.dcp(),
             0xe1 => { m = self.indx_indirect().0; self.sbc(m); },
+            0xe4 => { m = self.zp(); self.cpx(m); },
             0xe5 => { m = self.zp(); self.sbc(m); },
             0xe6 => { m = self.zp(); self.inc(m); },
             0xe8 => self.inx(),
@@ -399,7 +408,7 @@ impl ExecutionContext {
             0xec => { m = self.abs(); self.cpx(m); },
             0xed => { m = self.abs(); self.sbc(m); },
             0xc8 => self.iny(),
-            0xf0 => self.beq(),
+            0xf0 => { m = self.imm(); self.beq(m); },
             0xf1 => { m = self.indirect_indx().0; self.sbc(m); },
             0xf5 => { m = self.zp(); self.sbc(m); },
             0xf6 => { m = self.zp(); self.inc(m); },
@@ -411,8 +420,6 @@ impl ExecutionContext {
             0x1e => { m = self.absx().0; self.asl(m); },
             _ => unimplemented!("Unknown opcode:{:04x}", opcode),
         }
-        self.cpu.opcode = opcode as u8;
-        self.cpu.reg.prev_pc = self.cpu.reg.pc;
     }
 
     fn adc(&mut self, value: u16) {
@@ -457,37 +464,34 @@ impl ExecutionContext {
         self.cpu.flags.zero = (result & 0xff) == 0;
     }
     // Branch if Carry Set
-    fn bcs(&mut self) {
+    fn bcs(&mut self, value: u16) {
         if self.cpu.flags.carry {
-            let offset = self.read(self.cpu.reg.pc + 1) as i8 as u16;
+            let offset = self.read(value) as i8 as u16;
             self.cpu.reg.prev_pc = self.cpu.reg.pc;
             self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
-            self.adv_cycles(1);
-        } else {
-            self.adv_pc(2);
         }
-        self.adv_cycles(2);
     }
     fn bcc(&mut self) {
         if !self.cpu.flags.carry {
-            let offset = self.read(self.cpu.reg.pc + 1) as i8 as u16;
+            let imm = self.imm();
+            let offset = self.read(imm) as i8 as u16;
             self.cpu.reg.prev_pc = self.cpu.reg.pc;
             self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
             self.adv_cycles(1);
         } else {
-            self.adv_pc(2);
+            // self.adv_pc(2);
         }
         self.adv_cycles(2);
     }
     // Branch on Equal
-    fn beq(&mut self) {
+    fn beq(&mut self, value: u16) {
         if self.cpu.flags.zero {
             self.cpu.reg.prev_pc = self.cpu.reg.pc;
-            let offset = self.read(self.cpu.reg.pc + 1) as i8 as u16;
+            let offset = self.read(value) as i8 as u16;
             self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
             self.adv_cycles(1);
         } else {
-            self.adv_pc(2);
+            // self.adv_pc(2);
         }
         self.adv_cycles(2);
     }
@@ -502,7 +506,7 @@ impl ExecutionContext {
             self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
             self.adv_cycles(1);
         } else {
-            self.adv_pc(2);
+            // self.adv_pc(2);
         }
         self.adv_cycles(2);
     }
@@ -516,14 +520,16 @@ impl ExecutionContext {
             self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
             self.adv_cycles(3);
         } else {
-            self.adv_pc(2);
+            // self.adv_pc(2);
             self.adv_cycles(2);
         }
     }
 
     fn brk(&mut self) {
+        let addr = self.cpu.reg.pc.wrapping_add(1);
+        self.push_word(addr);
         self.cpu.flags.brk = true;
-        self.push_word(self.cpu.reg.pc + 1);
+        // TODO NMI
         self.cpu.reg.pc = self.read16(0xfffe);
     }
     // Test Bits N Z V
@@ -533,28 +539,38 @@ impl ExecutionContext {
         self.cpu.flags.negative = (value & 0x80) != 0;
         self.cpu.flags.overflow = (value & 0x40) != 0;
     }
-    fn bne(&mut self) {
+    fn bne(&mut self, value: u16) {
         // If zero flag is 0 branch
         if !self.cpu.flags.zero {
-            let offset = self.read(self.cpu.reg.pc + 1) as i8 as u16;
+            let offset = self.read(value) as i8 as u16;
             self.cpu.reg.prev_pc = self.cpu.reg.pc;
             self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
             self.adv_cycles(3);
         } else {
             self.adv_cycles(2)
         }
-        self.adv_pc(2);
     }
-    // Branch on overflow set
-    fn bvs(&mut self) {
-        if self.cpu.flags.overflow {
-            let offset = self.read(self.cpu.reg.pc + 1) as i8 as u16;
+    // Branch on overflow clear
+    fn bvc(&mut self, value: u16) {
+        if !self.cpu.flags.overflow {
+            let offset = self.read(value) as i8 as u16;
             self.cpu.reg.prev_pc = self.cpu.reg.pc;
             self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
             self.adv_cycles(3);
         } else {
             self.adv_cycles(2);
-            self.adv_pc(1);
+        }
+
+    }
+    // Branch on overflow set
+    fn bvs(&mut self, value: u16) {
+        if self.cpu.flags.overflow {
+            let offset = self.read(value) as i8 as u16;
+            self.cpu.reg.prev_pc = self.cpu.reg.pc;
+            self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
+            self.adv_cycles(3);
+        } else {
+            self.adv_cycles(2);
         }
     }
     // Clear carry
@@ -575,20 +591,19 @@ impl ExecutionContext {
     }
     // Compare with accumulator
     fn cmp(&mut self, value: u16) {
-        let result = self.cpu.reg.a as u16 - value;
+        let result = (self.cpu.reg.a as u16).wrapping_sub(value);
         self.cpu.flags.negative = (result & 0x80) != 0;
         self.cpu.flags.zero = (result & 0xff) == 0;
         self.cpu.flags.carry = (result & 0x01) != 0;
     }
     fn cpx(&mut self, value: u16) {
-        let x = self.cpu.reg.x as u16;
-        let result = self.cpu.reg.x as u16 - value;
+        let result = (self.cpu.reg.x as u16).wrapping_sub(value);
         self.cpu.flags.negative = (result & 0x80) != 0;
         self.cpu.flags.zero = (result & 0xff) == 0;
         self.cpu.flags.carry = (result & 0x01) != 0;
     }
     fn cpy(&mut self, value: u16) {
-        let result = self.cpu.reg.y as u16 - value;
+        let result = (self.cpu.reg.y as u16).wrapping_sub(value);
         self.cpu.flags.negative = (result & 0x80) != 0;
         self.cpu.flags.zero = (result & 0xff) == 0;
         self.cpu.flags.carry = (result & 0x01) != 0;
@@ -749,23 +764,22 @@ impl ExecutionContext {
         // self.cpu.flags.decimal = result & 0x08;
         // self.cpu.flags.overflow = result & 0x40;
     }
+    // TODO Cycles
     fn rts(&mut self) {
-        self.pop_byte();
+        // let addr = self.pop16().wrapping_add(1);
+        let addr = self.pop_byte();
         let value = self.cpu.reg.sp as u16;
 
         // Set program counter for debug output
         self.cpu.reg.prev_pc = self.cpu.reg.pc;
-        self.cpu.reg.pc = ((value << 8) - 1) as u16;
-        // self.cpu.reg.sp = sp.wrapping_add(2) as u8;
+        self.cpu.reg.pc = addr as u16;
     }
     // Return from interrupt
-    // TODO investigate
-    fn rti(&mut self) {
+    fn rti(&mut self, value: u16) {
         // Pull processor flags from stack
-        let addr = self.pop16();
-        self.cpu.reg.pc = addr;
-        let sp = self.cpu.reg.sp;
+        self.pop_byte();
 
+        let sp = self.cpu.reg.sp;
         // TODO Check bitmask
         self.cpu.flags.negative = sp & 0x80 != 0;
         self.cpu.flags.zero = sp & 0x40 != 0;
@@ -941,38 +955,30 @@ impl ExecutionContext {
     }
 
     // Jump to Subroutine
-    fn jsr(&mut self) {
+    fn jsr(&mut self, value: u16) {
         self.cpu.reg.prev_pc = self.cpu.reg.pc;
-        let addr = self.read16(self.cpu.reg.pc + 1);
-        // self.adv_pc(3);
+        // let addr = self.read16(value);
 
         // Push to stack
         let pc = self.cpu.reg.pc;
         self.cpu.reg.prev_pc = self.cpu.reg.pc;
         self.push_word(pc - 1);
         // self.adv_cycles(3); // 6 if no jump?
-        self.cpu.reg.pc = addr;
+        self.cpu.reg.pc = value;
     }
-    fn jmp(&mut self, mode: AddressMode) {
-        match mode {
-            AddressMode::Indirect => self.adv_cycles(5),
-            AddressMode::Absolute => self.adv_cycles(3),
-            _ => unimplemented!()
-        }
+    fn jmp(&mut self, value: u16) {
         self.cpu.reg.prev_pc = self.cpu.reg.pc;
-        self.cpu.reg.pc = self.read16(self.cpu.reg.pc + 1);
+        self.cpu.reg.pc = value;
     }
     fn sec(&mut self) {
         self.cpu.flags.carry = true;
-        self.adv_cycles(2);
-        self.adv_pc(1);
     }
     fn sei(&mut self) { self.cpu.flags.interrupt = true; }
     // ISC (Increase memory by one)
     fn isc(&mut self, mode: AddressMode) {
         let result = match mode {
             AddressMode::AbsoluteX => {
-                self.adv_pc(3);
+                // self.adv_pc(3);
                 self.adv_cycles(7);
 
                 let value = self.cpu.reg.pc.wrapping_add(1);
@@ -981,7 +987,7 @@ impl ExecutionContext {
                 (self.cpu.reg.a as u16).wrapping_sub(addr as u16).wrapping_sub(self.cpu.flags.carry as u16)
             }
             AddressMode::ZeroPageX => {
-                self.adv_pc(2);
+                // self.adv_pc(2);
                 self.adv_cycles(6);
 
                 let value = self.cpu.reg.pc.wrapping_add(1);
