@@ -8,7 +8,6 @@ use std::fmt;
 
 impl MemoryMapper for ExecutionContext {
     fn read(&mut self, addr: u16) -> u8 {
-        // println!("CPU Read ${:04x}", addr);
         self.adv_cycles(1);
 
         // See https://wiki.nesdev.com/w/index.php/CPU_memory_map
@@ -233,7 +232,7 @@ impl ExecutionContext {
     // Indirect X
     pub fn indx_indirect(&mut self) -> (u16, bool) {
         let imm = self.imm();
-        let data = (self.read(imm).wrapping_add((self.cpu.reg.x & 0xff)) as u8);
+        let data = (self.read(imm).wrapping_add(self.cpu.reg.x & 0xff) as u8);
         // let addr = self.read(data as u16) | self.read((data + 1) as u16) << 8;
         let addr = self.read(data as u16) | self.read((data + 1) as u16).wrapping_shl(8);
         let value = (self.read(addr as u16) & 0xff) as u16;
@@ -424,7 +423,7 @@ impl ExecutionContext {
 
     fn adc(&mut self, value: u16) {
         let a = self.cpu.reg.a as u16;
-        let (result, overflow) = a.overflowing_add(value.wrapping_add(self.cpu.flags.carry as u16));
+        let (result, overflow) = a.overflowing_add((self.read(value) as u16).wrapping_add(self.cpu.flags.carry as u16));
         self.cpu.reg.a = result as u8;
 
         self.cpu.flags.carry = (self.cpu.reg.a & 0x01) != 0;
@@ -458,7 +457,7 @@ impl ExecutionContext {
     }
 
     fn and(&mut self, value: u16) {
-        let result = self.cpu.reg.a as u16 & value;
+        let result = self.cpu.reg.a as u16 & self.read(value) as u16;
         self.cpu.reg.a = result as u8;
         self.cpu.flags.negative = (result & 0x80) != 0;
         self.cpu.flags.zero = (result & 0xff) == 0;
@@ -591,26 +590,26 @@ impl ExecutionContext {
     }
     // Compare with accumulator
     fn cmp(&mut self, value: u16) {
-        let result = (self.cpu.reg.a as u16).wrapping_sub(value);
+        let result = (self.cpu.reg.a as u16).wrapping_sub(self.read(value) as u16);
         self.cpu.flags.negative = (result & 0x80) != 0;
         self.cpu.flags.zero = (result & 0xff) == 0;
         self.cpu.flags.carry = (result & 0x01) != 0;
     }
     fn cpx(&mut self, value: u16) {
-        let result = (self.cpu.reg.x as u16).wrapping_sub(value);
+        let result = (self.cpu.reg.x as u16).wrapping_sub(self.read(value) as u16);
         self.cpu.flags.negative = (result & 0x80) != 0;
         self.cpu.flags.zero = (result & 0xff) == 0;
         self.cpu.flags.carry = (result & 0x01) != 0;
     }
     fn cpy(&mut self, value: u16) {
-        let result = (self.cpu.reg.y as u16).wrapping_sub(value);
+        let result = (self.cpu.reg.y as u16).wrapping_sub(self.read(value) as u16);
         self.cpu.flags.negative = (result & 0x80) != 0;
         self.cpu.flags.zero = (result & 0xff) == 0;
         self.cpu.flags.carry = (result & 0x01) != 0;
     }
 
     fn dec(&mut self, value: u16) {
-        let result = value.wrapping_sub(1);
+        let result = self.read(value).wrapping_sub(1);
         self.cpu.flags.negative = (result & 0x80) != 0;
         self.cpu.flags.zero = (result & 0xff) == 0;
     }
@@ -652,7 +651,7 @@ impl ExecutionContext {
     fn eor(&mut self, value: u16) {
         // Exclusive OR is performed on the accumulator's contents with the contents of a byte
         // of memory
-        self.cpu.reg.a = (value as u8 ^ self.cpu.reg.a) as u8;
+        self.cpu.reg.a = (self.read(value) as u8 ^ self.cpu.reg.a) as u8;
         self.cpu.flags.negative = (self.cpu.reg.a & 0x80) != 0;
         self.cpu.flags.zero = (self.cpu.reg.a & 0xff) == 0;
     }
@@ -665,28 +664,28 @@ impl ExecutionContext {
         // Load both the accumulator and the X register with contents of a memory location
         // Part of the undocumented 6502 opcodes
         // (Sub-instructions: LDA, LDX)
-        self.cpu.reg.a = value as u8;
-        self.cpu.reg.x = value as u8;
+        self.cpu.reg.a = self.read(value);
+        self.cpu.reg.x = self.read(value);
         self.cpu.flags.zero = (value & 0xff) == 0;
         self.cpu.flags.negative = (value & 0x80) != 0;
     }
     fn ldy(&mut self, value: u16) {
-        self.cpu.reg.y = value as u8;
+        self.cpu.reg.y = self.read(value);
         self.cpu.flags.zero = (value & 0xff) == 0;
         self.cpu.flags.negative = (value & 0x80) != 0;
     }
     fn ldx(&mut self, value: u16) {
-        self.cpu.reg.x = value as u8;
+        self.cpu.reg.x = self.read(value);
         self.cpu.flags.zero = (value & 0xff) == 0;
         self.cpu.flags.negative = (value & 0x80) != 0;
     }
     fn lda(&mut self, value: u16) {
-        self.cpu.reg.a = value as u8;
+        self.cpu.reg.a = self.read(value);
         self.cpu.flags.zero = (value & 0xff) == 0;
         self.cpu.flags.negative = (value & 0x80) != 0;
     }
     fn lsr(&mut self, value: u16) {
-        let data: u8 = self.read(value as u16);
+        let data: u8 =  value as u8;
         let result = (data >> 1) | ((self.cpu.flags.carry as u8) << 7);
         self.write(value as u16, result);
         self.cpu.flags.negative = (result & 0x80) != 0;
@@ -705,7 +704,7 @@ impl ExecutionContext {
     }
     fn nop(&mut self) { self.bump(1,2); }
     fn ora(&mut self, value: u16) {
-        self.cpu.reg.a = (value as u8 | self.cpu.reg.a) as u8;
+        self.cpu.reg.a = (self.read(value) as u8 | self.cpu.reg.a) as u8;
         self.cpu.flags.negative = (self.cpu.reg.a & 0x80) != 0;
         self.cpu.flags.zero = (self.cpu.reg.a & 0xff) == 0;
     }
@@ -805,8 +804,8 @@ impl ExecutionContext {
         self.cpu.flags.zero = (self.cpu.reg.a & 0xff) == 0;
     }
     // SLO Accumulator
-    fn sloa(&mut self) {
-        let value = self.read(self.cpu.reg.pc + 1) << 1;
+    fn sloa(&mut self, value: u16) {
+        let value = self.read(value) << 1;
         self.cpu.reg.a |= value;
         self.cpu.flags.carry = value & 0x80 != 0;
         self.cpu.flags.zero = value & 0xff == 0;
