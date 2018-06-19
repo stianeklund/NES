@@ -870,14 +870,14 @@ impl ExecutionContext {
     // Push register
     fn push_byte(&mut self, byte: u8) {
         let sp = self.cpu.reg.sp;
+        self.write(0x100 + sp as u16, byte);
         self.cpu.reg.sp = self.cpu.reg.sp.wrapping_sub(1);
-        self.write(0x100 | sp as u16, byte);
     }
     // Pull
     fn pop_byte(&mut self) -> u8 {
         let sp = self.cpu.reg.sp;
         self.cpu.reg.sp = sp.wrapping_add(1);
-        self.read(0x100 | sp as u16)
+        self.read(0x100 + self.cpu.reg.sp as u16)
     }
     fn pop16(&mut self) -> u16 {
         ((self.pop_byte() as u16) | (self.pop_byte() as u16) << 8)
@@ -907,9 +907,12 @@ impl ExecutionContext {
     }
     // Push Processor Status
     fn php(&mut self) {
+
         // Pushes a copy of the status flags to the stack
         let ps = self.get_status_flags();
-        self.push_byte(ps);
+        // Flag values OR BKR flag OR reserved flag (set to true for both)
+       let flags = ps | 0x20 | 0x10;
+        self.push_byte(flags);
     }
 
     // PuL1 (POP) Accumulator
@@ -919,7 +922,7 @@ impl ExecutionContext {
         let value = self.pop_byte();
         self.cpu.flags.zero = (value & 0xff) == 0;
         self.cpu.flags.negative = (value & 0x80) != 0;
-        self.cpu.reg.a = value;
+        self.cpu.reg.a = value & 0xff;
     }
     fn plp(&mut self) {
         let status = self.pop_byte();
