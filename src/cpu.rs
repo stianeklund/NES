@@ -98,7 +98,7 @@ impl Registers {
 pub struct Cpu {
     pub reg: Registers,
     flags: StatusRegister,
-    cycles: u16,
+    pub cycles: u16,
     opcode: u8,
 }
 
@@ -272,16 +272,17 @@ impl ExecutionContext {
         let mut m;
         match opcode {
             0x00 => self.brk(),
-            0x01 => self.bpl(),
+            0x01 => { m = self.imm(); self.bpl(m); },
             0x02 => ::std::process::exit(0x100),
             0x03 => { m = self.indirect_indx().0; self.slo(m); },
-            0x04 => { m = self.read(self.cpu.reg.pc + 1) as u16; self.rti(m); },
+            0x04 => { m = self.imm(); self.rti(m); },
             0x05 => { m = self.zp(); self.ora(m); },
             0x06 => { m = self.zp(); self.asl(m); },
             0x07 => { m = self.zp(); self.slo(m); },
             0x08 => self.php(),
             0x09 => { m = self.imm(); self.ora(m); },
-            0x10 => self.bpl(),
+            0x0d => { m = self.abs(); self.ora(m); },
+            0x10 => { m = self.imm(); self.bpl(m); },
             0x13 => { m = self.indirect_indx().0; self.slo(m); },
             0x15 => { m = self.zpx(); self.ora(m); },
             0x16 => { m = self.zp(); self.asl(m); },
@@ -330,14 +331,14 @@ impl ExecutionContext {
             0x49 => { m = self.imm(); self.eor(m); },
             0x28 => self.plp(),
             0x2a => self.rola(),
-            0x2c => { m = self.zp(); self.bit(m); },
+            0x2c => { m = self.abs(); self.bit(m); },
             0x2e => { m = self.abs(); self.rol(m); },
             0x20 => { m = self.abs(); self.jsr(m); },
             0x21 => { m = self.indirect_indx().0; self.and(m); },
             0x24 => { m = self.zp(); self.bit(m); },
             0x29 => { m = self.imm(); self.and(m); },
             0x2d => { m = self.abs(); self.and(m); },
-            0x30 => self.bmi(),
+            0x30 => { m = self.imm(); self.bmi(m); },
             0x35 => { m = self.zpx(); self.and(m); },
             0x36 => { m = self.zpx(); self.rol(m); },
             0x38 => self.sec(),
@@ -375,11 +376,12 @@ impl ExecutionContext {
             0x8c => { m = self.abs(); self.sty(m); },
             0x8d => { m = self.abs(); self.sta(m); },
             0x8e => { m = self.abs(); self.stx(m); },
-            0x90 => self.bcc(),
+            0x90 => { m = self.imm(); self.bcc(m); },
             0x91 => { m = self.indx_indirect().0; self.sta(m); },
             0x95 => { m = self.zpx(); self.sta(m); },
             0x96 => { m = self.zpy(); self.stx(m); },
             0x98 => self.tya(),
+            0x99 => { m = self.indirect_indx().0; self.sta(m); },
             0x9a => self.txs(),
             0x9d => { m = self.absx().0; self.sta(m); },
             0xc3 => self.dcp(),
@@ -470,15 +472,13 @@ impl ExecutionContext {
             self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
         }
     }
-    fn bcc(&mut self) {
+    fn bcc(&mut self, value: u16) {
         if !self.cpu.flags.carry {
-            let imm = self.imm();
-            let offset = self.read(imm) as i8 as u16;
+            self.cpu.reg.prev_pc = self.cpu.reg.pc;
+            let offset = self.read(value) as i8 as u16;
             self.cpu.reg.prev_pc = self.cpu.reg.pc;
             self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
             self.adv_cycles(1);
-        } else {
-            // self.adv_pc(2);
         }
         self.adv_cycles(2);
     }
@@ -489,37 +489,30 @@ impl ExecutionContext {
             let offset = self.read(value) as i8 as u16;
             self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
             self.adv_cycles(1);
-        } else {
-            // self.adv_pc(2);
         }
         self.adv_cycles(2);
     }
     // Branch if Minus
-    fn bmi(&mut self) {
-        // TODO Handle branch cycling
+    fn bmi(&mut self, value: u16) {
         // 2 cycles (+ 1 if branch succeeds, +2 if to a new page)
         // This is for all branch instructions
-        if !self.cpu.flags.negative {
-            let offset = self.read(self.cpu.reg.pc + 1) as i8 as u16;
+        if self.cpu.flags.negative {
             self.cpu.reg.prev_pc = self.cpu.reg.pc;
+            let offset = self.read(value) as i8 as u16;
             self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
             self.adv_cycles(1);
         } else {
-            // self.adv_pc(2);
         }
         self.adv_cycles(2);
     }
     // Branch on Plus (if positive)
-    fn bpl(&mut self) {
-        // Cycles 3+ / 2
-        // TODO with test rom we end up at STA but should be at next instruction STX
+    fn bpl(&mut self, value: u16) {
         if !self.cpu.flags.negative {
-            let offset = self.read(self.cpu.reg.pc + 1) as i8 as u16;
+            let offset = self.read(value) as i8 as u16;
             self.cpu.reg.prev_pc = self.cpu.reg.pc;
             self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
             self.adv_cycles(3);
         } else {
-            // self.adv_pc(2);
             self.adv_cycles(2);
         }
     }
@@ -528,15 +521,17 @@ impl ExecutionContext {
         let addr = self.cpu.reg.pc.wrapping_add(1);
         self.push_word(addr);
         self.cpu.flags.brk = true;
-        // TODO NMI
+        // TODO NMI (handle multiple vectors)
         self.cpu.reg.pc = self.read16(0xfffe);
     }
     // Test Bits N Z V
     fn bit(&mut self, value: u16) {
+        // Read data at address
+        let data = self.read(value) as u16;
         let a = self.cpu.reg.a as u16;
-        self.cpu.flags.zero = (value & a) == 0;
-        self.cpu.flags.negative = (value & 0x80) != 0;
-        self.cpu.flags.overflow = (value & 0x40) != 0;
+        self.cpu.flags.zero = (data & a) == 0;
+        self.cpu.flags.negative = (data & 0x80) != 0;
+        self.cpu.flags.overflow = (data & 0x40) != 0;
     }
     fn bne(&mut self, value: u16) {
         // If zero flag is 0 branch
@@ -572,22 +567,12 @@ impl ExecutionContext {
             self.adv_cycles(2);
         }
     }
-    // Clear carry
-    fn clc(&mut self) {
-        self.cpu.flags.carry = false;
-    }
-    // Clear decimal
-    fn cld(&mut self) {
-        self.cpu.flags.decimal = false;
-    }
-    // Clear Interrupt Disable
-    fn cli(&mut self) {
-        self.cpu.flags.interrupt = false;
-    }
-    // Clear overflow
-    fn clv(&mut self) {
-        self.cpu.flags.overflow = false;
-    }
+    // Flag clear instructions
+    fn clc(&mut self) { self.cpu.flags.carry = false; }
+    fn cld(&mut self) { self.cpu.flags.decimal = false; }
+    fn cli(&mut self) { self.cpu.flags.interrupt = false; }
+    fn clv(&mut self) { self.cpu.flags.overflow = false; }
+
     // Compare with accumulator
     fn cmp(&mut self, value: u16) {
         let result = (self.cpu.reg.a as u16).wrapping_sub(self.read(value) as u16);
@@ -628,7 +613,6 @@ impl ExecutionContext {
     // Decrement & compare
     fn dcp(&mut self) {
         println!("DCP (illegal opcode)");
-        let data = self.read(self.cpu.reg.pc + 2);
         unimplemented!();
     }
     // Double NOP
@@ -765,9 +749,8 @@ impl ExecutionContext {
     }
     // TODO Cycles
     fn rts(&mut self) {
-        // let addr = self.pop16().wrapping_add(1);
-        let addr = self.pop_byte();
-        let value = self.cpu.reg.sp as u16;
+        let addr = self.pop16().wrapping_add(1);
+        // let addr = self.pop_byte();
 
         // Set program counter for debug output
         self.cpu.reg.prev_pc = self.cpu.reg.pc;

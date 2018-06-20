@@ -4,7 +4,8 @@ pub struct Ppu {
     pub vram: Vec<u8>,
     pub addr: Vec<u16>,
     pub reg: Registers,
-    pub cycles: u8,
+    pub cycle: u8,
+    pub scanline: u8,
 }
 pub struct Registers {
     ppu_ctrl: u8,
@@ -81,7 +82,8 @@ impl Ppu {
             vram: vec![0; 16384],
             addr: vec![0u16],
             reg: Registers::default(),
-            cycles: 0,
+            cycle: 0,
+            scanline: 0
         }
     }
 }
@@ -90,7 +92,7 @@ impl Ppu {
 impl MemoryMapper for Ppu {
         fn read(&mut self, addr: u16) -> u8 {
             println!("PPU Read ${:04x}", addr);
-            self.cycles.wrapping_add(1);
+            self.cycle.wrapping_add(1);
         match addr {
             0... 0x1fff => self.chr[addr as usize],
             // TODO PPU Mirror? Is PPU size to `$3fff`?
@@ -113,6 +115,8 @@ impl MemoryMapper for Ppu {
             0x2000 => self.reg.ppu_ctrl_write(byte),
             0x2001 => self.reg.ppu_mask_write(byte),
             0x2002 => self.reg.ppu_status = byte,
+            0x2003 => self.reg.oam_addr = byte,
+            0x2004 => self.reg.oam_data = byte,
             0x2006 => self.reg.ppu_addr = byte,
             0x2007 =>  self.reg.ppu_data_write(byte),
             // TODO PPU Mirror? Is PPU size to `$3fff`?
@@ -126,5 +130,4 @@ impl MemoryMapper for Ppu {
         println!("PPU Write {:04x} to ${:04x}", byte, addr);
 
     }
-
 }
