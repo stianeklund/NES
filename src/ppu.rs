@@ -91,7 +91,7 @@ impl Ppu {
 // TODO Improve mapper to handle writes to registers that have write enable
 impl MemoryMapper for Ppu {
         fn read(&mut self, addr: u16) -> u8 {
-            println!("PPU Read ${:04x}", addr);
+            // println!("PPU Read ${:04x}", addr);
             self.cycle.wrapping_add(1);
         match addr {
             0... 0x1fff => self.chr[addr as usize],
@@ -127,7 +127,7 @@ impl MemoryMapper for Ppu {
             0x3f00 ... 0x3fff => panic!("Internal palette control; not implemented"),
             _ => panic!("PPU Write: Unrecognized address ${:04x}", addr)
         };
-        println!("PPU Write {:04x} to ${:04x}", byte, addr);
+        // println!("PPU Write {:04x} to ${:04x}", byte, addr);
 
     }
 }

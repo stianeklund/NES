@@ -32,7 +32,7 @@ impl MemoryMapper for ExecutionContext {
         }
     }
 
-    fn write(&mut self, addr: u16, byte: u8) {
+    fn write(&mut self, mut addr: u16, byte: u8) {
         match addr {
             0...0x07ff => self.ram.memory[addr as usize] = byte,
             0x0800...0x1fff => self.ram.memory[addr as usize & 0x07ff] = byte,
@@ -49,8 +49,8 @@ impl MemoryMapper for ExecutionContext {
                 // Output as characters when writing to SRAM
                 self.ram.sram[addr as usize] = byte;
                 // Print contents of work ram
-                let output = self.ram.sram[addr as usize];
-                println!("{}", output as char);
+                // println!(" Status: {:04x}", self.ram.sram[0x6000]);
+
             },
             0x8000...0xffff => self.cart.prg[addr as usize & 0x3fff] = byte,
             _ => eprintln!("Trying to write to memory address {:04x}", addr),
@@ -178,7 +178,7 @@ impl ExecutionContext {
         self.cpu.cycles = self.cpu.cycles.wrapping_add(cycles);
         // Page check
         // TODO add more address modes
-        if self.absy().1 || self.absx().1 || self.indirect_indx().1{
+        if self.absy().1 || self.absx().1 || self.indirect_y().1{
             self.cpu.cycles = self.cpu.cycles.wrapping_add(1);
         }
     }
@@ -230,7 +230,7 @@ impl ExecutionContext {
         }
     }
     // Indirect X
-    pub fn indx_indirect(&mut self) -> (u16, bool) {
+    pub fn indirect_x(&mut self) -> (u16, bool) {
         let imm = self.imm();
         let data = (self.read(imm).wrapping_add(self.cpu.reg.x & 0xff) as u8);
         // let addr = self.read(data as u16) | self.read((data + 1) as u16) << 8;
@@ -244,7 +244,7 @@ impl ExecutionContext {
     }
     // Indirect Y
     // TODO FIX
-    pub fn indirect_indx(&mut self) -> (u16, bool) {
+    pub fn indirect_y(&mut self) -> (u16, bool) {
         let imm = self.imm();
         let data = self.read(imm) + self.cpu.reg.y & 0xff;
         let addr = (self.read(data as u16) as u16 | self.read(data as u16 + 1) as u16) << 8;
@@ -262,19 +262,21 @@ impl ExecutionContext {
     pub fn decode(&mut self) {
         let imm = self.imm();
         let opcode = self.read(imm);
-        println!("{}", Instruction::mnemonic(opcode));
         self.cpu.opcode = opcode;
+
         // Debug print CPU values
+        println!("{}", Instruction::mnemonic(opcode));
         println!("{:?}", self.cpu);
+
         self.cpu.reg.prev_pc = self.cpu.reg.pc;
 
         // Address mode
         let mut m;
         match opcode {
             0x00 => self.brk(),
-            0x01 => { m = self.imm(); self.bpl(m); },
+            0x01 => { m = self.indirect_y().0; self.ora(m); },
             0x02 => ::std::process::exit(0x100),
-            0x03 => { m = self.indirect_indx().0; self.slo(m); },
+            0x03 => { m = self.indirect_y().0; self.slo(m); },
             0x04 => { m = self.imm(); self.rti(m); },
             0x05 => { m = self.zp(); self.ora(m); },
             0x06 => { m = self.zp(); self.asl(m); },
@@ -282,8 +284,8 @@ impl ExecutionContext {
             0x08 => self.php(),
             0x09 => { m = self.imm(); self.ora(m); },
             0x0d => { m = self.abs(); self.ora(m); },
-            0x10 => { m = self.imm(); self.bpl(m); },
-            0x13 => { m = self.indirect_indx().0; self.slo(m); },
+            0x10 => self.bpl(),
+            0x13 => { m = self.indirect_y().0; self.slo(m); },
             0x15 => { m = self.zpx(); self.ora(m); },
             0x16 => { m = self.zp(); self.asl(m); },
             0x17 => { m = self.zp(); self.slo(m); },
@@ -295,7 +297,7 @@ impl ExecutionContext {
             0x0e => { m = self.abs(); self.asl(m); },
             0x0a => self.asla(),
             0xa0 => { m = self.imm(); self.ldy(m); },
-            0xa1 => { m = self.indirect_indx().0; self.lda(m); },
+            0xa1 => { m = self.indirect_y().0; self.lda(m); },
             0xa2 => { m = self.imm(); self.ldx(m); },
             0xa4 => { m = self.zp(); self.ldy(m); },
             0xa5 => { m = self.zp(); self.lda(m); },
@@ -308,7 +310,7 @@ impl ExecutionContext {
             0xae => { m = self.abs(); self.ldx(m); },
             0xaf => { m = self.abs(); self.lax(m); },
             0xb0 => { m = self.imm(); self.bcs(m); },
-            0xb1 => { m = self.indirect_indx().0; self.lda(m); },
+            0xb1 => { m = self.indirect_y().0; self.lda(m); },
             0xb5 => { m = self.zp(); self.lda(m); },
             0xb6 => { m = self.zpy(); self.ldx(m); },
             0xb8 => self.clv(),
@@ -318,10 +320,10 @@ impl ExecutionContext {
             0xbd => { m = self.absx().0; self.lda(m); },
             0xbe => { m = self.absy().0; self.ldx(m); },
             0xc0 => { m = self.imm(); self.cpy(m); },
-            0xc1 => { m = self.indirect_indx().0; self.cmp(m); },
+            0xc1 => { m = self.indirect_y().0; self.cmp(m); },
             0xc5 => { m = self.zp(); self.cmp(m); },
             0x40 => { m = self.read(self.cpu.reg.pc + 1) as u16; self.rti(m); },
-            0x41 => { m = self.indirect_indx().0; self.eor(m); },
+            0x41 => { m = self.indirect_y().0; self.eor(m); },
             0x4a => self.lsra(),
             0x4e => { m = self.abs(); self.lsr(m); },
             0x4d => { m = self.abs(); self.eor(m); },
@@ -334,7 +336,7 @@ impl ExecutionContext {
             0x2c => { m = self.abs(); self.bit(m); },
             0x2e => { m = self.abs(); self.rol(m); },
             0x20 => { m = self.abs(); self.jsr(m); },
-            0x21 => { m = self.indirect_indx().0; self.and(m); },
+            0x21 => { m = self.indirect_y().0; self.and(m); },
             0x24 => { m = self.zp(); self.bit(m); },
             0x29 => { m = self.imm(); self.and(m); },
             0x2d => { m = self.abs(); self.and(m); },
@@ -345,14 +347,14 @@ impl ExecutionContext {
             0x3e => { m = self.absx().0; self.rol(m); },
             0x4c => { m = self.abs(); self.jmp(m); },
             0x50 => { m = self.imm(); self.bvc(m); },
-            0x51 => { m = self.indx_indirect().0; self.eor(m); },
+            0x51 => { m = self.indirect_x().0; self.eor(m); },
             0x54 => self.ign(),
             0x55 => { m = self.zpx(); self.eor(m); },
             0x5a => self.nop(),
             0x59 => { m = self.absy().0; self.eor(m); },
             0x5d => { m = self.absx().0; self.eor(m); },
             0x60 => self.rts(),
-            0x61 => { m = self.indx_indirect().0; self.adc(m); },
+            0x61 => { m = self.indirect_x().0; self.adc(m); },
             // TODO Dummy read for NOPs?
             0x64 => self.dop(AddressMode::ZeroPage),
             0x65 => { m = self.zp(); self.adc(m); },
@@ -367,7 +369,7 @@ impl ExecutionContext {
             0x72 => self.nop(),
             0x73 => self.nop(),
             0x78 => self.sei(),
-            0x79 => { m = self.indirect_indx().0; self.adc(m); },
+            0x79 => { m = self.indirect_y().0; self.adc(m); },
             0x7e => { m = self.absx().0; self.ror(m); },
             0x84 => { m = self.zp(); self.sty(m); },
             0x85 => { m = self.zp(); self.sta(m); },
@@ -377,11 +379,11 @@ impl ExecutionContext {
             0x8d => { m = self.abs(); self.sta(m); },
             0x8e => { m = self.abs(); self.stx(m); },
             0x90 => { m = self.imm(); self.bcc(m); },
-            0x91 => { m = self.indx_indirect().0; self.sta(m); },
+            0x91 => { m = self.indirect_x().0; self.sta(m); },
             0x95 => { m = self.zpx(); self.sta(m); },
             0x96 => { m = self.zpy(); self.stx(m); },
             0x98 => self.tya(),
-            0x99 => { m = self.indirect_indx().0; self.sta(m); },
+            0x99 => { m = self.indirect_y().0; self.sta(m); },
             0x9a => self.txs(),
             0x9d => { m = self.absx().0; self.sta(m); },
             0xc3 => self.dcp(),
@@ -399,7 +401,7 @@ impl ExecutionContext {
             0xd9 => { m = self.absy().0; self.cmp(m); },
             0xde => { m = self.absx().0; self.dec(m); },
             0xdf => self.dcp(),
-            0xe1 => { m = self.indx_indirect().0; self.sbc(m); },
+            0xe1 => { m = self.indirect_x().0; self.sbc(m); },
             0xe4 => { m = self.zp(); self.cpx(m); },
             0xe5 => { m = self.zp(); self.sbc(m); },
             0xe6 => { m = self.zp(); self.inc(m); },
@@ -410,8 +412,8 @@ impl ExecutionContext {
             0xed => { m = self.abs(); self.sbc(m); },
             0xc8 => self.iny(),
             0xf0 => { m = self.imm(); self.beq(m); },
-            0xf1 => { m = self.indirect_indx().0; self.sbc(m); },
-            0xf5 => { m = self.zp(); self.sbc(m); },
+            0xf1 => { m = self.indirect_y().0; self.sbc(m); },
+            0xf5 => { m = self.zpx(); self.sbc(m); },
             0xf6 => { m = self.zp(); self.inc(m); },
             0xf7 => self.isc(AddressMode::ZeroPageX),
             0xf8 => self.sed(),
@@ -506,9 +508,10 @@ impl ExecutionContext {
         self.adv_cycles(2);
     }
     // Branch on Plus (if positive)
-    fn bpl(&mut self, value: u16) {
+    fn bpl(&mut self) {
         if !self.cpu.flags.negative {
-            let offset = self.read(value) as i8 as u16;
+            let imm = self.imm();
+            let offset = self.read(imm) as i8 as u16;
             self.cpu.reg.prev_pc = self.cpu.reg.pc;
             self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
             self.adv_cycles(3);
