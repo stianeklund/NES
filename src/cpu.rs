@@ -284,7 +284,7 @@ impl ExecutionContext {
             0x08 => self.php(),
             0x09 => { m = self.imm(); self.ora(m); },
             0x0d => { m = self.abs(); self.ora(m); },
-            0x10 => self.bpl(),
+            0x10 => { m = self.imm(); self.bpl(m); },
             0x13 => { m = self.indirect_y().0; self.slo(m); },
             0x15 => { m = self.zpx(); self.ora(m); },
             0x16 => { m = self.zp(); self.asl(m); },
@@ -508,10 +508,9 @@ impl ExecutionContext {
         self.adv_cycles(2);
     }
     // Branch on Plus (if positive)
-    fn bpl(&mut self) {
+    fn bpl(&mut self, value: u16) {
         if !self.cpu.flags.negative {
-            let imm = self.imm();
-            let offset = self.read(imm) as i8 as u16;
+            let offset = self.read(value) as i8 as u16;
             self.cpu.reg.prev_pc = self.cpu.reg.pc;
             self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
             self.adv_cycles(3);

@@ -49,7 +49,7 @@ fn main() {
     loop {
         let step: bool = true;
         if step {
-            io::stdin().read_line(&mut String::new()).unwrap();
+            // io::stdin().read_line(&mut String::new()).unwrap();
             ctx.decode();
         }
     }
