@@ -32,7 +32,7 @@ impl MemoryMapper for ExecutionContext {
         }
     }
 
-    fn write(&mut self, mut addr: u16, byte: u8) {
+    fn write(&mut self, addr: u16, byte: u8) {
         match addr {
             0...0x07ff => self.ram.memory[addr as usize] = byte,
             0x0800...0x1fff => self.ram.memory[addr as usize & 0x07ff] = byte,
@@ -198,7 +198,6 @@ impl ExecutionContext {
         let imm16 = self.imm16();
         self.read16(imm16) as u16
     }
-    // TODO Check if we should set flags here?
     pub fn zp(&mut self) -> u16 {
         let imm = self.imm();
         (self.read(imm) & 0xff) as u16
@@ -232,9 +231,9 @@ impl ExecutionContext {
     // Indirect X
     pub fn indirect_x(&mut self) -> (u16, bool) {
         let imm = self.imm();
-        let data = (self.read(imm).wrapping_add(self.cpu.reg.x & 0xff) as u8);
+        let data = self.read(imm).wrapping_add(self.cpu.reg.x & 0xff) as u8;
         // let addr = self.read(data as u16) | self.read((data + 1) as u16) << 8;
-        let addr = self.read(data as u16) | self.read((data + 1) as u16).wrapping_shl(8);
+        let addr = self.read(data as u16) | self.read((data.wrapping_add(1)) as u16).wrapping_shl(8);
         let value = (self.read(addr as u16) & 0xff) as u16;
         if (value.wrapping_sub(self.cpu.reg.x as u16) & 0xff00) != value & 0xff00 {
             (value, true)
@@ -267,6 +266,8 @@ impl ExecutionContext {
         // Debug print CPU values
         println!("{}", Instruction::mnemonic(opcode));
         println!("{:?}", self.cpu);
+        // Print flag values for referencing other emulators
+        println!("P:{:02x}", self.get_status_flags());
 
         self.cpu.reg.prev_pc = self.cpu.reg.pc;
 
@@ -331,14 +332,17 @@ impl ExecutionContext {
             0x46 => { m = self.zp(); self.lsr(m); },
             0x48 => self.pha(),
             0x49 => { m = self.imm(); self.eor(m); },
-            0x28 => self.plp(),
-            0x2a => self.rola(),
-            0x2c => { m = self.abs(); self.bit(m); },
-            0x2e => { m = self.abs(); self.rol(m); },
             0x20 => { m = self.abs(); self.jsr(m); },
             0x21 => { m = self.indirect_y().0; self.and(m); },
             0x24 => { m = self.zp(); self.bit(m); },
+            0x25 => { m = self.zp(); self.and(m); },
+            0x26 => { m = self.zp(); self.rol(m); },
+            0x28 => self.plp(),
             0x29 => { m = self.imm(); self.and(m); },
+            0x2a => self.rola(),
+            0x2c => { m = self.abs(); self.bit(m); },
+            0x2e => { m = self.abs(); self.rol(m); },
+
             0x2d => { m = self.abs(); self.and(m); },
             0x30 => { m = self.imm(); self.bmi(m); },
             0x35 => { m = self.zpx(); self.and(m); },
@@ -371,10 +375,12 @@ impl ExecutionContext {
             0x78 => self.sei(),
             0x79 => { m = self.indirect_y().0; self.adc(m); },
             0x7e => { m = self.absx().0; self.ror(m); },
+            0x81 => { m = self.indirect_x().0; self.sta(m); },
             0x84 => { m = self.zp(); self.sty(m); },
             0x85 => { m = self.zp(); self.sta(m); },
             0x86 => { m = self.zp(); self.stx(m); },
             0x88 => self.dey(),
+            0x8a => self.txa(),
             0x8c => { m = self.abs(); self.sty(m); },
             0x8d => { m = self.abs(); self.sta(m); },
             0x8e => { m = self.abs(); self.stx(m); },
@@ -392,6 +398,7 @@ impl ExecutionContext {
             0xc9 => { m = self.imm(); self.cmp(m); },
             0xca => self.dex(),
             0xce => { m = self.abs(); self.dec(m); },
+            0xcd => { m = self.abs(); self.cmp(m); },
             0xcc => { m = self.zp(); self.cpy(m); },
             0xd0 => { m = self.imm(); self.bne(m); },
             0xd2 => self.hlt(),
@@ -401,6 +408,7 @@ impl ExecutionContext {
             0xd9 => { m = self.absy().0; self.cmp(m); },
             0xde => { m = self.absx().0; self.dec(m); },
             0xdf => self.dcp(),
+            0xe0 => { m = self.imm(); self.cpx(m); },
             0xe1 => { m = self.indirect_x().0; self.sbc(m); },
             0xe4 => { m = self.zp(); self.cpx(m); },
             0xe5 => { m = self.zp(); self.sbc(m); },
@@ -449,20 +457,21 @@ impl ExecutionContext {
         // ASL shifts all bits left one position. 0 is shifted into bit 0
         // and the original bit 7 is shifted into the carry slot
         // Affected flags: S Z C
-
-        let pc = self.cpu.reg.pc;
-        let value: u8 = self.read(addr as u16);
+        let value = self.read(addr as u16);
         self.write(addr as u16, value as u8);
+        self.cpu.flags.carry = value >> 1 & 0xfe != 0;
+        self.cpu.flags.negative = (value << 1 & 0x80) != 0;
+        self.cpu.flags.zero = (self.cpu.reg.a & 0xff) == 0;
+
         // Shift data left by one and write it back to memory
         self.write(addr as u16, value << 1);
-        self.cpu.flags.carry = value >> 1 & 0xfe != 0;
-        self.cpu.flags.negative = (value & 0x80) != 0;
-        self.cpu.flags.zero = (value & 0xff) == 0;
     }
 
     fn and(&mut self, value: u16) {
-        let result = self.cpu.reg.a as u16 & self.read(value) as u16;
-        self.cpu.reg.a = result as u8;
+        // let result = self.cpu.reg.a as u16 & self.read(value) as u16;
+        let result = self.read(value);
+        let a = self.cpu.reg.a;
+        self.cpu.reg.a = a & result as u8;
         self.cpu.flags.negative = (result & 0x80) != 0;
         self.cpu.flags.zero = (result & 0xff) == 0;
     }
@@ -577,22 +586,22 @@ impl ExecutionContext {
 
     // Compare with accumulator
     fn cmp(&mut self, value: u16) {
-        let result = (self.cpu.reg.a as u16).wrapping_sub(self.read(value) as u16);
-        self.cpu.flags.negative = (result & 0x80) != 0;
-        self.cpu.flags.zero = (result & 0xff) == 0;
-        self.cpu.flags.carry = (result & 0x01) != 0;
+        let value = self.read(value);
+        self.cpu.flags.zero = self.cpu.reg.a == value;
+        self.cpu.flags.carry = self.cpu.reg.a >= value;
+        self.cpu.flags.negative = self.cpu.reg.a as i16 - value as i16 & 0x80 == 0x80;
     }
     fn cpx(&mut self, value: u16) {
-        let result = (self.cpu.reg.x as u16).wrapping_sub(self.read(value) as u16);
-        self.cpu.flags.negative = (result & 0x80) != 0;
-        self.cpu.flags.zero = (result & 0xff) == 0;
-        self.cpu.flags.carry = (result & 0x01) != 0;
+        let value = self.read(value);
+        self.cpu.flags.zero = self.cpu.reg.x == value;
+        self.cpu.flags.carry = self.cpu.reg.x>= value;
+        self.cpu.flags.negative = self.cpu.reg.x as i16 - value as i16 & 0x80 == 0x80;
     }
     fn cpy(&mut self, value: u16) {
-        let result = (self.cpu.reg.y as u16).wrapping_sub(self.read(value) as u16);
-        self.cpu.flags.negative = (result & 0x80) != 0;
-        self.cpu.flags.zero = (result & 0xff) == 0;
-        self.cpu.flags.carry = (result & 0x01) != 0;
+        let value = self.read(value);
+        self.cpu.flags.zero = self.cpu.reg.y == value;
+        self.cpu.flags.carry = self.cpu.reg.y>= value;
+        self.cpu.flags.negative = self.cpu.reg.y as i16 - value as i16 & 0x80 == 0x80;
     }
 
     fn dec(&mut self, value: u16) {
@@ -661,14 +670,16 @@ impl ExecutionContext {
         self.cpu.flags.negative = (value & 0x80) != 0;
     }
     fn ldx(&mut self, value: u16) {
-        self.cpu.reg.x = self.read(value);
-        self.cpu.flags.zero = (value & 0xff) == 0;
-        self.cpu.flags.negative = (value & 0x80) != 0;
+        let result = self.read(value);
+        self.cpu.reg.x = result;
+        self.cpu.flags.zero = (result & 0xff) == 0;
+        self.cpu.flags.negative = (result & 0x80) != 0;
     }
     fn lda(&mut self, value: u16) {
-        self.cpu.reg.a = self.read(value);
-        self.cpu.flags.zero = (value & 0xff) == 0;
-        self.cpu.flags.negative = (value & 0x80) != 0;
+        let result = self.read(value);
+        self.cpu.reg.a = result;
+        self.cpu.flags.zero = (result & 0xff) == 0;
+        self.cpu.flags.negative = (result & 0x80) != 0;
     }
     fn lsr(&mut self, value: u16) {
         let data: u8 =  value as u8;
@@ -688,7 +699,9 @@ impl ExecutionContext {
         self.cpu.flags.zero = (self.cpu.reg.a & 0xff) == 0;
         self.cpu.flags.carry = carry;
     }
-    fn nop(&mut self) { self.bump(1,2); }
+    fn nop(&mut self) {
+        // do nothing
+    }
     fn ora(&mut self, value: u16) {
         self.cpu.reg.a = (self.read(value) as u8 | self.cpu.reg.a) as u8;
         self.cpu.flags.negative = (self.cpu.reg.a & 0x80) != 0;
@@ -705,11 +718,11 @@ impl ExecutionContext {
         self.cpu.flags.carry = (result & 0x01) != 0;
     }
     // Rotate one bit right memory or accumulator
-    fn rol(&mut self, value: u16) {
+    fn rol(&mut self, addr: u16) {
         // Original bit is shifted into carry slot & carry is shifted into bit 7.
+        let value = self.read(addr);
         let result = value << 1 & 0xfe;
         // The program counter is already modified by this point by the above `match`.
-        let addr = self.cpu.reg.pc;
         self.write(addr, result as u8);
 
         // Set flag values
@@ -729,25 +742,22 @@ impl ExecutionContext {
         self.cpu.flags.zero = (result & 0xff) == 0;
         self.cpu.flags.carry = (result & 0x01) != 0;
     }
-    fn ror(&mut self, value: u16) {
+    fn ror(&mut self, addr: u16) {
         // TODO check if result is correct
         // Assuming the slot is the same but the bit shift direction changes due to it being a
         // Rotate Right instruction
         // Original bit is shifted into carry slot & carry is shifted into bit 7.
+        let value = self.read(addr);
         let result = value >> 1 & 0xfe;
         // The program counter is already modified by this point by the above `match`.
-        let addr = self.cpu.reg.pc;
+        // let addr = self.cpu.reg.pc;
         // Write result to memory address
         self.write(addr, result as u8);
 
         // Set flag values
         self.cpu.flags.negative = (result & 0x80) != 0;
-        self.cpu.flags.zero = (result & 0xff) == 0;
+        self.cpu.flags.zero = self.cpu.reg.a & 0xff == 0;
         self.cpu.flags.carry = (result & 0x01) != 0;
-
-        // self.cpu.flags.interrupt = result & 0x04;
-        // self.cpu.flags.decimal = result & 0x08;
-        // self.cpu.flags.overflow = result & 0x40;
     }
     // TODO Cycles
     fn rts(&mut self) {
@@ -868,7 +878,7 @@ impl ExecutionContext {
     }
     // Push accumulator
     fn pha(&mut self) { self.push_byte(self.cpu.reg.a); }
-    fn get_status_flags(&mut self) -> u8 {
+    fn get_status_flags(&self) -> u8 {
         let ps = if self.cpu.flags.negative { 0x80 } else { 0x0 } |
             if self.cpu.flags.overflow { 0x40 } else { 0x0 } |
             if self.cpu.flags.reserved { 0x20 } else { 0x0 } |
@@ -957,9 +967,7 @@ impl ExecutionContext {
         self.cpu.reg.prev_pc = self.cpu.reg.pc;
         self.cpu.reg.pc = value;
     }
-    fn sec(&mut self) {
-        self.cpu.flags.carry = true;
-    }
+    fn sec(&mut self) { self.cpu.flags.carry = true; }
     fn sei(&mut self) { self.cpu.flags.interrupt = true; }
     // ISC (Increase memory by one)
     fn isc(&mut self, mode: AddressMode) {
