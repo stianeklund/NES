@@ -1,4 +1,11 @@
-use interconnect::MemoryMapper;
+use interconnect::{MemoryMapper, Interconnect};
+use minifb::{Scale, WindowOptions, Window};
+use std::fmt::{Debug, Formatter, Result};
+use std::fmt::LowerHex;
+
+pub const WIDTH: u32 = 240;
+pub const HEIGHT: u32 = 256;
+
 pub struct Ppu {
     pub chr: Vec<u8>,
     pub vram: Vec<u8>,
@@ -6,6 +13,10 @@ pub struct Ppu {
     pub reg: Registers,
     pub cycle: u8,
     pub scanline: u8,
+    pub nametable: Vec<u8>,
+    pub attribute_table: Vec<u8>,
+    pub vblank: bool,
+    pub buffer: Vec<u16>,
 }
 pub struct Registers {
     ppu_ctrl: u8,
@@ -19,7 +30,29 @@ pub struct Registers {
     ppu_data: u8,
     oam_dma: u8,
 }
-
+pub struct FrameBuffer {
+    pub ppu: Ppu,
+    pub buffer: Box<[u16; 258 * 240]>,
+    pub window: Window
+}
+    pub fn new() -> FrameBuffer {
+    let mut window = Window::new(
+        "NES",
+        WIDTH as usize,
+        HEIGHT as usize,
+        WindowOptions {
+            borderless: false,
+            title: false,
+            resize: false,
+            ..WindowOptions::default()
+        },
+    ).unwrap();
+   FrameBuffer {
+       ppu: Ppu::default(),
+       buffer: Box::new([0u16; 258 * 240]),
+       window
+   }
+}
 impl Registers {
     pub fn default() -> Self {
         Registers {
@@ -73,7 +106,7 @@ impl Registers {
 }
 // Internal data bus for CPU communications
 pub struct PpuDataBus {
-
+// TODO
 }
 impl Ppu {
     pub fn default() -> Self {
@@ -83,10 +116,32 @@ impl Ppu {
             addr: vec![0u16],
             reg: Registers::default(),
             cycle: 0,
-            scanline: 0
+            scanline: 0,
+            nametable: vec![],
+            attribute_table: vec![],
+            vblank: false,
+            buffer: vec![HEIGHT as u16 * WIDTH as u16],
         }
     }
 }
+
+impl LowerHex for Registers {
+    fn fmt(&self, f: &mut Formatter) -> Result {
+        let value = self;
+        write!(f, "{:04x}", value)
+    }
+}
+impl Debug for Registers {
+    fn fmt(&self, f: &mut Formatter) -> Result {
+        writeln!(f, "{}\t{}\t{}\t{}\t{}\t{}{}",
+                 "CTRL","MASK","OAM","DATA","SCROLL","ADDR\t", "DMA\t");
+        writeln!(f, "{:02x}\t{:02x}\t{:02x}\t{:02x}\t{:02x}\t{:02x}\t{:02x}",
+                 self.ppu_ctrl, self.ppu_mask, self.ppu_oam, self.oam_data,
+                 self.ppu_scroll, self.ppu_addr, self.oam_dma)?;
+        Ok(())
+    }
+}
+
 // The PPU addresses a 16kB space, $0000-3FFF.
 // TODO Improve mapper to handle writes to registers that have write enable
 impl MemoryMapper for Ppu {
@@ -127,7 +182,10 @@ impl MemoryMapper for Ppu {
             0x3f00 ..= 0x3fff => panic!("Internal palette control; not implemented"),
             _ => panic!("PPU Write: Unrecognized address ${:04x}", addr)
         };
-        // println!("PPU Write {:04x} to ${:04x}", byte, addr);
+        // If we write anything except 0s lets print that out
+        if byte > 0x0000 {
+            println!("{:#?}", self.reg);
+        }
 
     }
 }

@@ -1,27 +1,26 @@
-use interconnect::{MemoryMapper};
+use interconnect::MemoryMapper;
 use opcode::Instruction;
 use memory::Ram;
 use rom::Cartridge;
-use ppu::Ppu;
+use ppu::{Ppu, FrameBuffer};
 use apu::Apu;
 use std::fmt;
-
 impl MemoryMapper for ExecutionContext {
     fn read(&mut self, addr: u16) -> u8 {
         self.adv_cycles(1);
 
         // See https://wiki.nesdev.com/w/index.php/CPU_memory_map
         match addr {
-            0 ..= 0x07ff => self.ram.memory[addr as usize] as u8,
-            0x0800 ..= 0x1fff => self.ram.memory[addr as usize & 0x07ff],
-            0x2000 ..= 0x3fff => self.ppu.read(addr),
-            0x4000 ..= 0x4017 => self.apu.read(addr),
-            0x4018 ..= 0x401f => unimplemented!("Read to CPU Test space"),
+            0...0x07ff => self.ram.memory[addr as usize] as u8,
+            0x0800 ... 0x1fff => self.ram.memory[addr as usize & 0x07ff],
+            0x2000 ... 0x3fff => self.ppu.read(addr),
+            0x4000 ... 0x4017 => self.apu.read(addr),
+            0x4018 ... 0x401f => unimplemented!("Read to CPU Test space"),
             // $6000-$7FFF = Battery Backed Save or Work RAM
-            0x6000 ..= 0x7fff => self.ram.sram[addr as usize] as u8,
-            0x8000 ..= 0xffff => {
-                let mut mask_amount;
-                if self.cart.header.prg_rom_page_size == 1 {
+            0x6000 ... 0x7fff => self.ram.sram[addr as usize] as u8,
+            0x8000...0xffff => {
+                let mut mask_amount = 0;
+                if self.cart.header.prg_rom_size == 1 {
                     mask_amount = 0x3fff;
                 } else {
                     mask_amount = 0x7fff;
@@ -31,31 +30,31 @@ impl MemoryMapper for ExecutionContext {
             _ => unimplemented!("Reads to ${:04x} is not implemented", addr),
         }
     }
-
     fn write(&mut self, addr: u16, byte: u8) {
         match addr {
-            0 ..= 0x07ff => self.ram.memory[addr as usize] = byte,
-            0x0800 ..= 0x1fff => self.ram.memory[addr as usize & 0x07ff] = byte,
+            0...0x07ff => self.ram.memory[addr as usize] = byte,
+            0x0800...0x1fff => self.ram.memory[addr as usize & 0x07ff] = byte,
 
             // $2000-2FFF is normally mapped to the 2kB NES internal VRAM,
             // providing 2 nametables with a mirroring configuration controlled by the cartridge,
             // but it can be partly or fully remapped to RAM on the cartridge,
             // allowing up to 4 simultaneous nametables.
 
-            0x2000 ..= 0x3fff => self.ppu.write(addr,byte),
-            0x4000 ..= 0x4017 => self.apu.write(addr, byte),
-            0x6000 ..= 0x7fff => {
+            0x2000 ... 0x3fff => self.ppu.write(addr,byte),
+            0x4000 ... 0x4017 => self.apu.write(addr, byte),
+            0x6000 ... 0x7fff => {
+                self.ram.sram[addr as usize] = byte;
+
                 // Many CPU tests just store ASCII characters in SRAM
                 // Output as characters when writing to SRAM
-                self.ram.sram[addr as usize] = byte;
-                // Print contents of work ram
-                // println!(" Status: {:04x}", self.ram.sram[0x6000]);
+                // println!("Status: {:04x}", self.ram.sram[0x6000]);
 
             },
-            0x8000 ..= 0xffff => self.cart.prg[addr as usize & 0x3fff] = byte,
+            0x8000...0xffff => self.cart.prg[addr as usize & 0x3fff] = byte,
             _ => eprintln!("Trying to write to memory address {:04x}", addr),
         };
-        println!("Writing {:04x} to ${:04x}", byte, addr);
+        // Print out written values at resolved addresses
+        println!("{}", ExecutionContext::resolve_addr(byte, addr));
         self.adv_cycles(1); // Advance cycle for each write
     }
 }
@@ -100,15 +99,17 @@ pub struct Cpu {
     flags: StatusRegister,
     pub cycles: u16,
     opcode: u8,
+    p: u8,
 }
 
 impl fmt::Debug for Cpu {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(f, "{}\t{}\t{}\t{}\t{}\t{}{} {} {} {} {} {}",
-                 "Opcode","PC","SP","A","X","Y\t", "N\t","D\t","I\t","Z\t","C\t","Cycles")?;
-        writeln!(f, "{:04x}\t{:04x}\t{:04x}\t{:02x}\t{:02x}\t{:02x}\t{}\t{}\t{}\t{}\t{}\t{}",
-                 self.opcode, self.reg.prev_pc, self.reg.sp, self.reg.a, self.reg.x, self.reg.y,
-                 self.flags.negative, self.flags.decimal, self.flags.interrupt, self.flags.zero, self.flags.carry, self.cycles)?;
+        writeln!(f, "{}\t{}\t{}\t{}\t{}\t{}{} {} {} {} {} {} {}",
+                 "Opcode","PC","SP","A","X","Y\t", "N\t","D\t","I\t","Z\t","C\t","P\t","Cycles")?;
+        writeln!(f, "{:04x}\t{:04x}\t{:04x}\t{:02x}\t{:02x}\t{:02x}\t{}\t{}\t{}\t{}\t{}\t{:02x}\t{}",
+                 self.opcode, self.reg.prev_pc, self.reg.sp, self.reg.a, self.reg.x,
+                 self.reg.y, self.flags.negative, self.flags.decimal, self.flags.interrupt,
+                 self.flags.zero, self.flags.carry, self.p, self.cycles)?;
         Ok(())
     }
 }
@@ -136,10 +137,11 @@ impl Cpu {
             },
             cycles: 0,
             opcode: 0,
+            p: 0,
         }
     }
 }
-
+#[derive(Debug)]
 pub struct ExecutionContext {
     pub cpu: Cpu,
     pub cart: Cartridge,
@@ -147,20 +149,6 @@ pub struct ExecutionContext {
     pub ppu: Ppu,
     pub apu: Apu,
 }
-#[derive(Debug, PartialEq)]
-enum AddressMode {
-    ZeroPage,    // Zero Page addressing, $00nn
-    ZeroPageX,   // $00nn + X
-    ZeroPageY,   // $00nn + y
-    Immediate,   // Immediate addressing; immediately following the opcode.
-    Absolute,    // Absolute addressing. Fetches the next 2 mem slots & combines them into a word.
-    AbsoluteX,   // X indexed. Fetches the next 2 mem slots & combines them into a word, then adds X.
-    AbsoluteY,   // Y indexed. Fetches the next 2 mem slots & combines them into a word, then adds Y.
-    Indirect,    // Indirect addressing; special for JMP (Not really implemented or needed?)
-    IndirectX,   // Indexed Indirect (only used on X reg). See: http://www.emulator101.com/6502-addressing-modes.html
-    IndirectY,   // Indirect Indexed (only used on Y reg) see above URL.
-}
-
 impl ExecutionContext {
     pub fn new() -> ExecutionContext {
         ExecutionContext {
@@ -169,17 +157,6 @@ impl ExecutionContext {
             ram: Ram::default(),
             ppu: Ppu::default(),
             apu: Apu::default(),
-        }
-    }
-    // TODO Remove or refactor
-    fn bump(&mut self, bytes: u16, cycles: u16) {
-        self.cpu.reg.prev_pc = self.cpu.reg.pc;
-        self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(bytes);
-        self.cpu.cycles = self.cpu.cycles.wrapping_add(cycles);
-        // Page check
-        // TODO add more address modes
-        if self.absy().1 || self.absx().1 || self.indirect_y().1{
-            self.cpu.cycles = self.cpu.cycles.wrapping_add(1);
         }
     }
     fn adv_pc(&mut self, amount: u16) { self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(amount); }
@@ -204,11 +181,11 @@ impl ExecutionContext {
     }
     pub fn zpx(&mut self) -> u16 {
         let imm = self.imm();
-        (self.read(imm & 0xff) as u16 + self.cpu.reg.x as u16)
+        self.read(imm) as u16 + self.cpu.reg.x as u16 & 0xff
     }
     pub fn zpy(&mut self) -> u16 {
         let imm = self.imm();
-        (self.read16(imm as u16) & 0xff) + self.cpu.reg.y as u16
+        self.read16(imm as u16) + self.cpu.reg.y as u16 & 0xff
     }
     pub fn absx(&mut self) -> (u16, bool) {
         let imm16 = self.imm16();
@@ -228,11 +205,9 @@ impl ExecutionContext {
             (value, false)
         }
     }
-    // Indirect X
     pub fn indirect_x(&mut self) -> (u16, bool) {
         let imm = self.imm();
-        let data = self.read(imm).wrapping_add(self.cpu.reg.x & 0xff) as u8;
-        // let addr = self.read(data as u16) | self.read((data + 1) as u16) << 8;
+        let data: u16 = (self.read(imm) as u16 + self.cpu.reg.y as u16) & 0xffff;
         let addr = self.read(data as u16) | self.read((data.wrapping_add(1)) as u16).wrapping_shl(8);
         let value = (self.read(addr as u16) & 0xff) as u16;
         if (value.wrapping_sub(self.cpu.reg.x as u16) & 0xff00) != value & 0xff00 {
@@ -241,13 +216,15 @@ impl ExecutionContext {
             (value, false)
         }
     }
-    // Indirect Y
-    // TODO FIX
     pub fn indirect_y(&mut self) -> (u16, bool) {
+        // Fetch effective address
         let imm = self.imm();
-        let data = self.read(imm) + self.cpu.reg.y & 0xff;
-        let addr = (self.read(data as u16) as u16 | self.read(data as u16 + 1) as u16) << 8;
-        let value: u16 = self.read(addr as u16) as u16;
+        // Add Y register to the effective address
+        let data: u16 = self.read(imm) as u16;
+        // Create word of effective address
+        let addr = self.read(data as u16) | self.read((data.wrapping_add(1)) as u16).wrapping_shl(8);
+        // Read value at final effective address
+        let value: u16 = self.read(addr as u16) as u16 + self.cpu.reg.y as u16 & 0xffff;
         if (value.wrapping_sub(self.cpu.reg.y as u16) & 0xff00) != value & 0xff00 {
             (value, true)
         } else {
@@ -262,17 +239,17 @@ impl ExecutionContext {
         let imm = self.imm();
         let opcode = self.read(imm);
         self.cpu.opcode = opcode;
+        println!("{:02x} {:02x } {:02x}", opcode, self.read(imm +1), self.read(imm +2));
 
         // Debug print CPU values
         println!("{}", Instruction::mnemonic(opcode));
         println!("{:?}", self.cpu);
         // Print flag values for referencing other emulators
-        println!("P:{:02x}", self.get_status_flags());
-
+        // println!("P:{:02x}", self.get_status_flags());
+        self.cpu.p = self.get_status_flags();
         self.cpu.reg.prev_pc = self.cpu.reg.pc;
 
-        // Address mode
-        let mut m;
+        let mut m; // store address mode in m variable
         match opcode {
             0x00 => self.brk(),
             0x01 => { m = self.indirect_y().0; self.ora(m); },
@@ -352,7 +329,7 @@ impl ExecutionContext {
             0x4c => { m = self.abs(); self.jmp(m); },
             0x50 => { m = self.imm(); self.bvc(m); },
             0x51 => { m = self.indirect_x().0; self.eor(m); },
-            0x54 => self.ign(),
+            0x54 => self.nop(), // Unofficial opcode: IGN
             0x55 => { m = self.zpx(); self.eor(m); },
             0x5a => self.nop(),
             0x59 => { m = self.absy().0; self.eor(m); },
@@ -360,7 +337,7 @@ impl ExecutionContext {
             0x60 => self.rts(),
             0x61 => { m = self.indirect_x().0; self.adc(m); },
             // TODO Dummy read for NOPs?
-            0x64 => self.dop(AddressMode::ZeroPage),
+            0x64 => self.dop(),
             0x65 => { m = self.zp(); self.adc(m); },
             0x66 => { m = self.zp(); self.ror(m); },
             0x68 => self.pla(),
@@ -423,11 +400,11 @@ impl ExecutionContext {
             0xf1 => { m = self.indirect_y().0; self.sbc(m); },
             0xf5 => { m = self.zpx(); self.sbc(m); },
             0xf6 => { m = self.zp(); self.inc(m); },
-            0xf7 => self.isc(AddressMode::ZeroPageX),
+            0xf7 => { m = self.zp(); self.isc(m); },
             0xf8 => self.sed(),
             0xfe => { m = self.absx().0; self.inc(m); },
             0xfd => { m = self.absx().0; self.sbc(m); },
-            0xff => self.isc(AddressMode::AbsoluteX),
+            0xff => { m = self.absx().0; self.isc(m); },
             0x1e => { m = self.absx().0; self.asl(m); },
             _ => unimplemented!("Unknown opcode:{:04x}", opcode),
         }
@@ -527,12 +504,10 @@ impl ExecutionContext {
             self.adv_cycles(2);
         }
     }
-
     fn brk(&mut self) {
         let addr = self.cpu.reg.pc.wrapping_add(1);
         self.push_word(addr);
         self.cpu.flags.brk = true;
-        // TODO NMI (handle multiple vectors)
         self.cpu.reg.pc = self.read16(0xfffe);
     }
     // Test Bits N Z V
@@ -622,26 +597,9 @@ impl ExecutionContext {
         self.cpu.flags.zero = self.cpu.reg.x & 0xff == 0;
     }
     // Decrement & compare
-    fn dcp(&mut self) {
-        println!("DCP (illegal opcode)");
-        unimplemented!();
-    }
+    fn dcp(&mut self) { println!("DCP (illegal opcode)"); unimplemented!(); }
     // Double NOP
-    fn dop(&mut self, mode: AddressMode) {
-        match mode {
-            AddressMode::ZeroPage => {
-            },
-            AddressMode::ZeroPageX => {},
-            AddressMode::ZeroPageY => {},
-            AddressMode::Immediate => {},
-            AddressMode::Absolute => {},
-            AddressMode::AbsoluteX => {},
-            AddressMode::AbsoluteY => {},
-            AddressMode::Indirect => {},
-            AddressMode::IndirectX => {},
-            AddressMode::IndirectY => {},
-        }
-    }
+    fn dop(&mut self) { self.adv_cycles(1); }
     // Exclusive OR (XOR)
     fn eor(&mut self, value: u16) {
         // Exclusive OR is performed on the accumulator's contents with the contents of a byte
@@ -722,17 +680,10 @@ impl ExecutionContext {
         // Original bit is shifted into carry slot & carry is shifted into bit 7.
         let value = self.read(addr);
         let result = value << 1 & 0xfe;
-        // The program counter is already modified by this point by the above `match`.
         self.write(addr, result as u8);
-
-        // Set flag values
         self.cpu.flags.negative = (result & 0x80) != 0;
         self.cpu.flags.zero = (result & 0xff) == 0;
         self.cpu.flags.carry = (result & 0x01) != 0;
-
-        // self.cpu.flags.interrupt = result & 0x04;
-        // self.cpu.flags.decimal = result & 0x08;
-        // self.cpu.flags.overflow = result & 0x40;
     }
     fn rora(&mut self) {
         let result = self.cpu.reg.a >> 1 & 0xfe;
@@ -743,7 +694,6 @@ impl ExecutionContext {
         self.cpu.flags.carry = (result & 0x01) != 0;
     }
     fn ror(&mut self, addr: u16) {
-        // TODO check if result is correct
         // Assuming the slot is the same but the bit shift direction changes due to it being a
         // Rotate Right instruction
         // Original bit is shifted into carry slot & carry is shifted into bit 7.
@@ -759,17 +709,15 @@ impl ExecutionContext {
         self.cpu.flags.zero = self.cpu.reg.a & 0xff == 0;
         self.cpu.flags.carry = (result & 0x01) != 0;
     }
-    // TODO Cycles
     fn rts(&mut self) {
         let addr = self.pop16().wrapping_add(1);
-        // let addr = self.pop_byte();
-
         // Set program counter for debug output
         self.cpu.reg.prev_pc = self.cpu.reg.pc;
         self.cpu.reg.pc = addr as u16;
+        self.adv_cycles(6);
     }
     // Return from interrupt
-    fn rti(&mut self, _value: u16) {
+    fn rti(&mut self, value: u16) {
         // Pull processor flags from stack
         self.pop_byte();
 
@@ -780,7 +728,6 @@ impl ExecutionContext {
         self.cpu.flags.carry = sp & 0x10 != 0;
         self.cpu.flags.interrupt = sp & 0x04 != 0;
         self.cpu.flags.decimal = sp & 0x01 != 0;
-        // self.adv_cycles(6);
     }
     fn sed(&mut self) {
         self.cpu.flags.decimal = true;
@@ -813,10 +760,10 @@ impl ExecutionContext {
         self.cpu.flags.carry = result & 0x80 != 0;
         self.cpu.flags.zero = result & 0xff == 0;
     }
-    // TODO Check cpu flags (if we need to check zero & negative on zpx addr mode
+    // TODO Check cpu flags (if we need to check zero & negative on zero page, x addr mode
     fn sta(&mut self, value: u16) { self.write(value, self.cpu.reg.a); }
     fn sty(&mut self, value: u16) { self.write(value, self.cpu.reg.y); }
-    // TODO Check cpu flags (if we need to check zero & negative on zpx addr mode
+    // TODO Check cpu flags (if we need to check zero & negative on zero page, x addr mode
     fn stx(&mut self, value: u16) { self.write(value, self.cpu.reg.x); }
     // Transfer Accumulator to X
     fn tax(&mut self) {
@@ -901,11 +848,10 @@ impl ExecutionContext {
     }
     // Push Processor Status
     fn php(&mut self) {
-
         // Pushes a copy of the status flags to the stack
         let ps = self.get_status_flags();
         // Flag values OR BKR flag OR reserved flag (set to true for both)
-       let flags = ps | 0x20 | 0x10;
+        let flags = ps | 0x20 | 0x10;
         self.push_byte(flags);
     }
 
@@ -940,21 +886,9 @@ impl ExecutionContext {
         self.cpu.flags.zero = (self.cpu.reg.y & 0xff) == 0;
         self.cpu.flags.negative = (self.cpu.reg.y & 0x80) != 0;
     }
-    fn ign(&mut self) {
-        // IGN d,X ($14 dd, $34 dd, $54 dd, $74 dd, $D4 dd, $F4 dd; 4 cycles)
-        // Reads from memory at the specified address and ignores the value. Affects no register nor flags.
-        // The absolute version can be used to increment PPUADDR or reset the PPUSTATUS latch as an alternative to BIT.
-        // The zero page version has no side effects.
-        // IGN d,X reads from both d and (d+X)&255. IGN a,X additionally reads from a+X-256 it crosses a page boundary (i.e. if ((a & 255) + X) > 255)
-        // Sometimes called TOP (triple-byte no-op), SKW (skip word), DOP (double-byte no-op), or SKB (skip byte).
-        let addr = self.cpu.reg.pc + 1;
-        self.read(addr);
-    }
-
     // Jump to Subroutine
     fn jsr(&mut self, value: u16) {
         self.cpu.reg.prev_pc = self.cpu.reg.pc;
-        // let addr = self.read16(value);
 
         // Push to stack
         let pc = self.cpu.reg.pc;
@@ -968,29 +902,12 @@ impl ExecutionContext {
     }
     fn sec(&mut self) { self.cpu.flags.carry = true; }
     fn sei(&mut self) { self.cpu.flags.interrupt = true; }
-    // ISC (Increase memory by one)
-    fn isc(&mut self, mode: AddressMode) {
-        let result = match mode {
-            AddressMode::AbsoluteX => {
-                // self.adv_pc(3);
-                self.adv_cycles(7);
 
-                let value = self.cpu.reg.pc.wrapping_add(1);
-                let addr = self.read16(value).wrapping_add(self.cpu.reg.x as u16);
-                if (value - self.cpu.reg.x as u16) & 0xff00 != value & 0xff00 { self.adv_cycles(1); }
-                (self.cpu.reg.a as u16).wrapping_sub(addr as u16).wrapping_sub(self.cpu.flags.carry as u16)
-            }
-            AddressMode::ZeroPageX => {
-                // self.adv_pc(2);
-                self.adv_cycles(6);
-
-                let value = self.cpu.reg.pc.wrapping_add(1);
-                let addr = self.read16(value) & 0xff + self.cpu.reg.x as u16;
-                (self.cpu.reg.a as u16).wrapping_sub(addr as u16).wrapping_sub(self.cpu.flags.carry as u16)
-            }
-            _ => unimplemented!("Mode not supported {:?}", mode)
-        };
-
+    // ISC (Increase memory by one) UNOFFICIAL OPCODE
+    fn isc(&mut self, value: u16) {
+        let addr = self.read16(value).wrapping_add(self.cpu.reg.x as u16);
+        if (value - self.cpu.reg.x as u16) & 0xff00 != value & 0xff00 { self.adv_cycles(1); }
+        let result = (self.cpu.reg.a as u16).wrapping_sub(addr as u16).wrapping_sub(self.cpu.flags.carry as u16);
         self.cpu.flags.zero = (result & 0xff) == 0;
         self.cpu.flags.negative = (result & 0x80) != 0;
         self.cpu.reg.a = result as u8;

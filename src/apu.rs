@@ -3,7 +3,7 @@ use interconnect::MemoryMapper;
 // Audio won't be implemented anytime soon..
 // This is just to support rudimentary r/w APU & I/O data.
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct Apu {
     pub mem: Vec<u8>,
     pub reg: Registers,
@@ -11,7 +11,7 @@ pub struct Apu {
 
 
 // APU registers
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct Registers {
     pulse_1: u8,
     pulse_2: u8,
