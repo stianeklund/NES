@@ -1,7 +1,7 @@
-use rom::Cartridge;
-use cpu::{ExecutionContext, Cpu, Registers};
 use memory::Ram;
 use ppu::Ppu;
+use rom::Cartridge;
+use cpu::Registers;
 
 pub trait MemoryMapper {
     fn read(&mut self, addr: u16) -> u8 ;
@@ -38,10 +38,10 @@ impl Interconnect {
     // TODO PPU address space
     fn read(&self, addr: u16) -> u8 {
         match addr {
-            0 ... 0x07ff => self.ram.memory[addr as usize],
-            0x0800 ... 0x1fff => self.ram.memory[addr as usize & 0x07ff],
-            0x2000 ... 0x3fff => panic!("Trying to read from PPU registers. Not implemented"),
-            0x8000 ... 0xffff => {
+            0 ..= 0x07ff => self.ram.memory[addr as usize],
+            0x0800 ..= 0x1fff => self.ram.memory[addr as usize & 0x07ff],
+            0x2000 ..= 0x3fff => panic!("Trying to read from PPU registers. Not implemented"),
+            0x8000 ..= 0xffff => {
                 let mut prg_size = 0;
                 if self.cart.header.prg_rom_size == 1 { prg_size = 0x3fff; }
                 else { prg_size = 0x7fff; }
@@ -54,10 +54,10 @@ impl Interconnect {
 
     fn write(&mut self, addr: u16, byte: u8) {
         match addr {
-            0...0x07ff => self.ram.memory[addr as usize] = byte,
-            0x0800...0x1fff => self.ram.memory[addr as usize & 0x07ff] = byte,
-            0x2000 ... 0x3fff => eprintln!("Writing to PPU registers is not implemented"),
-            0x8000...0xffff => self.cart.prg[addr as usize & 0x3fff] = byte,
+            0..=0x07ff => self.ram.memory[addr as usize] = byte,
+            0x0800..=0x1fff => self.ram.memory[addr as usize & 0x07ff] = byte,
+            0x2000 ..= 0x3fff => eprintln!("Writing to PPU registers is not implemented"),
+            0x8000..=0xffff => self.cart.prg[addr as usize & 0x3fff] = byte,
             _ => eprintln!("Unable to write to memory address"),
         };
 

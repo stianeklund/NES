@@ -33,12 +33,12 @@ const CHR_ROM_BANK_SIZE: usize = 8192;
 pub struct RomHeader {
     pub magic: [u8; 4],
     sram: u8,
-    pub prg_rom_size: usize,
-    pub chr_rom_size: usize,
+    pub prg_rom_page_size: usize,
+    pub chr_rom_page_size: usize,
     pub flags_6: u8,
     flags_7: u8,
-    pub prg_ram_size: u8,
-    pub chr_ram_size: u8,
+    pub prg_ram_page_size: usize,
+    pub chr_ram_page_size: usize,
     flags_9: u8,
     flags_10: u8,
     pub zero: [u8; 5],
@@ -49,12 +49,12 @@ impl Default for RomHeader {
         RomHeader {
             magic: [0; 4],
             sram: 0,
-            prg_rom_size: 0,
-            chr_rom_size: 0,
+            prg_rom_page_size: 0x4000,
+            chr_rom_page_size: 0x2000,
             flags_6: 0,
             flags_7: 0,
-            prg_ram_size: 8192,
-            chr_ram_size: 0,
+            prg_ram_page_size: 0x2000,
+            chr_ram_page_size: 0x2000,
             flags_9: 0,
             flags_10: 0,
             zero: [0; 5],
@@ -78,10 +78,10 @@ impl MemoryMapper for Cartridge {
         // let addr = self.mask_addr(addr);
         println!("Cart read: ${:04x}", addr);
         match addr {
-            0 ... 0x07ff => panic!("Trying to read RAM from Cartridge"),
-            0x0800 ... 0x1fff => panic!("Trying to read RAM Mirror from Cartridge"),
-            0x2000 ... 0x3fff => panic!("Trying to read from PPU registers. Not implemented"),
-            0x8000 ... 0xffff => self.prg[addr as usize & 0x3fff],
+            0 ..= 0x07ff => panic!("Trying to read RAM from Cartridge"),
+            0x0800 ..= 0x1fff => panic!("Trying to read RAM Mirror from Cartridge"),
+            0x2000 ..= 0x3fff => panic!("Trying to read from PPU registers. Not implemented"),
+            0x8000 ..= 0xffff => self.prg[addr as usize & 0x3fff],
             _ => panic!("Unrecognized read address: {:04x}", addr)
         }
     }
@@ -92,10 +92,10 @@ impl MemoryMapper for Cartridge {
     fn write(&mut self, addr: u16, byte: u8) {
         println!("Cart write: {:04x} to ${:04x}", byte, addr);
         match addr {
-            0 ... 0x07ff => self.write(addr, byte),
-            0x0800 ... 0x1fff => self.write(addr, byte),
-            0x2000 ... 0x3fff => self.write(addr, byte),
-            0x8000 ... 0xffff => self.write(addr, byte),
+            0 ..= 0x07ff => self.write(addr, byte),
+            0x0800 ..= 0x1fff => self.write(addr, byte),
+            0x2000 ..= 0x3fff => self.write(addr, byte),
+            0x8000 ..= 0xffff => self.write(addr, byte),
             _ => eprintln!("Unable to write to memory address"),
         }
     }
@@ -150,7 +150,7 @@ impl Cartridge {
         self.header.magic = [header[0], header[1], header[2], header[3]];
 
         if self.header.magic.is_ascii() {
-            let magic = str::from_utf8(&self.header.magic).unwrap().trim_right_matches('');
+            let magic = str::from_utf8(&self.header.magic).unwrap().trim_end_matches('');
             println!("ROM header: {}", magic);
 
             // Print bank sizes
@@ -172,12 +172,12 @@ impl Cartridge {
         Ok(RomHeader {
             magic: [header[0], header[1], header[2], header[3]],
             sram: 0,
-            prg_rom_size: header[4] as usize,
-            chr_rom_size: header[5] as usize,
+            prg_rom_page_size: header[4] as usize,
+            chr_rom_page_size: header[5] as usize,
             flags_6: header[6],
             flags_7: header[7],
-            prg_ram_size: header[8],
-            chr_ram_size: 0,
+            prg_ram_page_size: header[8] as usize,
+            chr_ram_page_size: 0,
             flags_9: 0,
             flags_10: header[9],
             zero: [header[11], header[12], header[13], header[14], header[15]],
@@ -193,10 +193,10 @@ impl Cartridge {
         let header = self.validate_header(&rom).unwrap();
         self.header = header;
 
-        let mut prg_lenght = 0;
+        let mut prg_lenght;
         // TODO Handle this better. We need to check the sizes here & allocate accordingly.
 
-        if self.header.prg_rom_size == 1 {
+        if self.header.prg_rom_page_size == 1 {
             prg_lenght = 0x4000;
         } else {
             prg_lenght = 0x8000;

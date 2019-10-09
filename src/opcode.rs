@@ -104,7 +104,7 @@ impl Instruction {
             0x4a => "LSR A          ",
             0x4e => "LSR            ",
             0x48 => "PHA            ",
-            0x50 => "BVC            ",
+            0x50 => "BVC / BVS?     ",
             0x5d => "EOR Absolute X ",
             0x6a => "ROR A          ",
             0x6d => "ADC Absolute   ",
@@ -130,7 +130,6 @@ impl Instruction {
             0x49 => "EOR Immediate  ",
             0x4c => "JMP            ",
             0x4d => "EOR Absolute   ",
-            0x50 => "BVS            ",
             0x51 => "EOR Indirect Y ",
             0x54 => "IGN (NOP)      ",
             0x55 => "EOR Zero Page X",
@@ -203,7 +202,7 @@ impl Instruction {
             0xfd => "SBC Absolute X ",
             0xfe => "INC Absolute X ",
             0xff => "ISC Absolute X ",
-            _    => "Opcode not in print table",
+            _    => "Opcode not in print table, or invalid opcode",
         }
     }
 }

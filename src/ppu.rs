@@ -73,7 +73,7 @@ impl Registers {
 }
 // Internal data bus for CPU communications
 pub struct PpuDataBus {
-// TODO
+
 }
 impl Ppu {
     pub fn default() -> Self {
@@ -94,7 +94,7 @@ impl MemoryMapper for Ppu {
             // println!("PPU Read ${:04x}", addr);
             self.cycle.wrapping_add(1);
         match addr {
-            0... 0x1fff => self.chr[addr as usize],
+            0 ..= 0x1fff => self.chr[addr as usize],
             // TODO PPU Mirror? Is PPU size to `$3fff`?
             // Pattern Tables to be split up or just use one array & mask off what we need?
             0x2000 => self.reg.ppu_ctrl,
@@ -103,15 +103,15 @@ impl MemoryMapper for Ppu {
             0x2002 => self.reg.ppu_status,
             // R/W to this addr should increment VRAM by amount specified at $2000:2
             0x2007 => self.reg.ppu_data,
-            0x2008 ... 0x2fff => self.vram[addr as usize],
-            0x3000 ... 0x3eff => self.vram[addr as usize & 0x2eff],
-            0x3f00 ... 0x3fff => panic!("Internal palette control; not implemented"),
+            0x2008 ..= 0x2fff => self.vram[addr as usize],
+            0x3000 ..= 0x3eff => self.vram[addr as usize & 0x2eff],
+            0x3f00 ..= 0x3fff => panic!("Internal palette control; not implemented"),
             _ => panic!("PPU Read: unrecognized address ${:04x}", addr)
         }
     }
     fn write(&mut self, addr: u16, byte: u8) {
         match addr {
-            0... 0x1fff => self.chr[addr as usize] = byte,
+            0 ..= 0x1fff => self.chr[addr as usize] = byte,
             0x2000 => self.reg.ppu_ctrl_write(byte),
             0x2001 => self.reg.ppu_mask_write(byte),
             0x2002 => self.reg.ppu_status = byte,
@@ -121,10 +121,10 @@ impl MemoryMapper for Ppu {
             0x2007 =>  self.reg.ppu_data_write(byte),
             // TODO PPU Mirror? Is PPU size to `$3fff`?
             // Pattern Tables to be split up or just use one array & mask off what we need?
-            0x2008 ... 0x2fff => self.vram[addr as usize] = byte,
+            0x2008 ..= 0x2fff => self.vram[addr as usize] = byte,
             // Mirror
-            0x3000 ... 0x3eff => self.vram[addr as usize & 0x2eff] = byte,
-            0x3f00 ... 0x3fff => panic!("Internal palette control; not implemented"),
+            0x3000 ..= 0x3eff => self.vram[addr as usize & 0x2eff] = byte,
+            0x3f00 ..= 0x3fff => panic!("Internal palette control; not implemented"),
             _ => panic!("PPU Write: Unrecognized address ${:04x}", addr)
         };
         // println!("PPU Write {:04x} to ${:04x}", byte, addr);

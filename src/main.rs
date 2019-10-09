@@ -1,5 +1,5 @@
-#![feature(ascii_ctype)]
-#![feature(nll)]
+// #![feature(ascii_ctype)]
+// #![feature(nll)]
 
 extern crate minifb;
 
@@ -20,12 +20,12 @@ use cpu::ExecutionContext;
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() != 2 {
-        println!("[Please specify ROM as an argument]");
+        println!("[Please specify the ROM as an argument]");
         return;
     }
     let file = &args[1];
     let path = Path::new(file);
-    let mut f = File::open(&path).expect("Couldn't find ROM");
+    let mut f = File::open(&path).expect("Unable to find ROM");
 
 
     // TODO Cleanup use interconnect instead
@@ -37,13 +37,14 @@ fn main() {
     ctx.reset();
     ctx.cart.load_rom(&mut f);
 
+    // For debugging purposes
     // Get word at memory location 0xfffc and set PC value.
     println!("Reset Vector: {:04x}", ctx.read16(0xfffc));
     println!("NMI Vector:   {:04x}", ctx.read16(0xfffa));
     println!("IRQ Vector:   {:04x}", ctx.read16(0xfffe));
-    ctx.cpu.reg.pc = ctx.read16(0xfffc);
+    // ctx.cpu.reg.pc = ctx.read16(0xfffc);
     // For nestest only
-    // ctx.cpu.reg.pc = 0xc000;
+    ctx.cpu.reg.pc = 0xc000;
 
     // Step one instruction at a time
     loop {
