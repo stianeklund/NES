@@ -1,6 +1,6 @@
 use interconnect::{MemoryMapper};
 use opcode::Instruction;
-use memory::{Ram};
+use memory::Ram;
 use rom::Cartridge;
 use ppu::Ppu;
 use apu::Apu;
