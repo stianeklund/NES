@@ -172,6 +172,7 @@ impl MemoryMapper for Ppu {
             0x2002 => self.reg.ppu_status = byte,
             0x2003 => self.reg.oam_addr = byte,
             0x2004 => self.reg.oam_data = byte,
+            0x2005 => self.reg.ppu_scroll = byte,
             0x2006 => self.reg.ppu_addr = byte,
             0x2007 =>  self.reg.ppu_data_write(byte),
             // TODO PPU Mirror? Is PPU size to `$3fff`?
@@ -186,6 +187,5 @@ impl MemoryMapper for Ppu {
         if byte > 0x0000 {
             println!("{:#?}", self.reg);
         }
-
     }
 }

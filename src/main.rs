@@ -1,6 +1,3 @@
-// #![feature(ascii_ctype)]
-// #![feature(nll)]
-
 extern crate minifb;
 
 mod rom;
@@ -42,15 +39,17 @@ fn main() {
     println!("Reset Vector: {:04x}", ctx.read16(0xfffc));
     println!("NMI Vector:   {:04x}", ctx.read16(0xfffa));
     println!("IRQ Vector:   {:04x}", ctx.read16(0xfffe));
-    // ctx.cpu.reg.pc = ctx.read16(0xfffc);
+    ctx.cpu.reg.pc = ctx.read16(0xfffc);
     // For nestest only
-    ctx.cpu.reg.pc = 0xc000;
+    // ctx.cpu.reg.pc = 0xc000;
 
     // Step one instruction at a time
     loop {
-        let step: bool = true;
+        let step: bool = false;
         if step {
-            // io::stdin().read_line(&mut String::new()).unwrap();
+            io::stdin().read_line(&mut String::new()).unwrap();
+            ctx.decode();
+        } else {
             ctx.decode();
         }
     }

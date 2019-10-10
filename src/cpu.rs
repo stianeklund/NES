@@ -1,4 +1,4 @@
-use interconnect::MemoryMapper;
+use interconnect::{MemoryMapper, AddressMatch};
 use opcode::Instruction;
 use memory::Ram;
 use rom::Cartridge;
@@ -11,16 +11,16 @@ impl MemoryMapper for ExecutionContext {
 
         // See https://wiki.nesdev.com/w/index.php/CPU_memory_map
         match addr {
-            0...0x07ff => self.ram.memory[addr as usize] as u8,
-            0x0800 ... 0x1fff => self.ram.memory[addr as usize & 0x07ff],
-            0x2000 ... 0x3fff => self.ppu.read(addr),
-            0x4000 ... 0x4017 => self.apu.read(addr),
-            0x4018 ... 0x401f => unimplemented!("Read to CPU Test space"),
+            0 ..= 0x07ff => self.ram.memory[addr as usize] as u8,
+            0x0800 ..= 0x1fff => self.ram.memory[addr as usize & 0x07ff],
+            0x2000 ..= 0x3fff => self.ppu.read(addr),
+            0x4000 ..= 0x4017 => self.apu.read(addr),
+            0x4018 ..= 0x401f => unimplemented!("Read to CPU Test space"),
             // $6000-$7FFF = Battery Backed Save or Work RAM
-            0x6000 ... 0x7fff => self.ram.sram[addr as usize] as u8,
-            0x8000...0xffff => {
-                let mut mask_amount = 0;
-                if self.cart.header.prg_rom_size == 1 {
+            0x6000 ..= 0x7fff => self.ram.sram[addr as usize] as u8,
+            0x8000 ..= 0xffff => {
+                let mask_amount;
+                if self.cart.header.prg_rom_page_size == 1 {
                     mask_amount = 0x3fff;
                 } else {
                     mask_amount = 0x7fff;
@@ -32,29 +32,24 @@ impl MemoryMapper for ExecutionContext {
     }
     fn write(&mut self, addr: u16, byte: u8) {
         match addr {
-            0...0x07ff => self.ram.memory[addr as usize] = byte,
-            0x0800...0x1fff => self.ram.memory[addr as usize & 0x07ff] = byte,
+            0 ..= 0x07ff => self.ram.memory[addr as usize] = byte,
+            0x0800 ..= 0x1fff => self.ram.memory[addr as usize & 0x07ff] = byte,
 
             // $2000-2FFF is normally mapped to the 2kB NES internal VRAM,
             // providing 2 nametables with a mirroring configuration controlled by the cartridge,
             // but it can be partly or fully remapped to RAM on the cartridge,
             // allowing up to 4 simultaneous nametables.
 
-            0x2000 ... 0x3fff => self.ppu.write(addr,byte),
-            0x4000 ... 0x4017 => self.apu.write(addr, byte),
-            0x6000 ... 0x7fff => {
-                self.ram.sram[addr as usize] = byte;
-
-                // Many CPU tests just store ASCII characters in SRAM
-                // Output as characters when writing to SRAM
-                // println!("Status: {:04x}", self.ram.sram[0x6000]);
-
-            },
-            0x8000...0xffff => self.cart.prg[addr as usize & 0x3fff] = byte,
+            0x2000 ..= 0x3fff => self.ppu.write(addr,byte),
+            0x4000 ..= 0x4017 => self.apu.write(addr, byte),
+            0x6000 ..= 0x7fff => { self.ram.sram[addr as usize] = byte; },
+            // Some tests store ASCII characters in SRAM. Output as characters when writing to SRAM
+           // println!("Status: {:04x}", self.ram.sram[0x6000]);
+            0x8000 ..= 0xffff => self.cart.prg[addr as usize & 0x3fff] = byte,
             _ => eprintln!("Trying to write to memory address {:04x}", addr),
         };
         // Print out written values at resolved addresses
-        println!("{}", ExecutionContext::resolve_addr(byte, addr));
+        // println!("{}", AddressMatch::resolve_addr(byte, addr));
         self.adv_cycles(1); // Advance cycle for each write
     }
 }
@@ -141,7 +136,6 @@ impl Cpu {
         }
     }
 }
-#[derive(Debug)]
 pub struct ExecutionContext {
     pub cpu: Cpu,
     pub cart: Cartridge,
@@ -717,7 +711,7 @@ impl ExecutionContext {
         self.adv_cycles(6);
     }
     // Return from interrupt
-    fn rti(&mut self, value: u16) {
+    fn rti(&mut self, _value: u16) {
         // Pull processor flags from stack
         self.pop_byte();
 
