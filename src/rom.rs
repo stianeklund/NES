@@ -1,15 +1,13 @@
 
 use std::ops::{Index, IndexMut};
 use std::ops::{Range, RangeTo};
-use std::fmt;
 use std::path::Path;
 use std::io::Read;
 use std::fs::File;
 use std::io::{Result, Error};
 use std::str;
 use memory::Ram;
-use interconnect::{MemoryMapper, Interconnect};
-use std::convert;
+use interconnect::MemoryMapper;
 
 /* ******************************************************************************************** */
 // iNES HEADER INFORMATION

@@ -1,5 +1,6 @@
 extern crate minifb;
 
+mod lib;
 mod rom;
 mod interconnect;
 mod opcode;
@@ -36,12 +37,13 @@ fn main() {
 
     // For debugging purposes
     // Get word at memory location 0xfffc and set PC value.
-    println!("Reset Vector: {:04x}", ctx.read16(0xfffc));
-    println!("NMI Vector:   {:04x}", ctx.read16(0xfffa));
-    println!("IRQ Vector:   {:04x}", ctx.read16(0xfffe));
+    // Note reads add to the cycle counter..
+    // println!("Reset Vector: {:04x}", ctx.read16(0xfffc));
+    // println!("NMI Vector:   {:04x}", ctx.read16(0xfffa));
+    // println!("IRQ Vector:   {:04x}", ctx.read16(0xfffe));
     ctx.cpu.reg.pc = ctx.read16(0xfffc);
     // For nestest only
-    // ctx.cpu.reg.pc = 0xc000;
+    ctx.cpu.reg.pc = 0xc000;
 
     // Step one instruction at a time
     loop {

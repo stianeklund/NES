@@ -8,7 +8,7 @@ use std::fmt;
 
 impl MemoryMapper for ExecutionContext {
     fn read(&mut self, addr: u16) -> u8 {
-        self.adv_cycles(1);
+        self.adv_cycles(1); // Why is this being called when reading from main?
 
         // See https://wiki.nesdev.com/w/index.php/CPU_memory_map
         match addr {
@@ -49,8 +49,10 @@ impl MemoryMapper for ExecutionContext {
             0x8000 ..= 0xffff => self.cart.prg[addr as usize & 0x3fff] = byte,
             _ => eprintln!("Trying to write to memory address {:04x}", addr),
         };
-        // Print known address names
-        println!("{}", AddressMatch::resolve_addr(byte, addr));
+        if self.debug {
+            //Print known address names
+            println!("{}", AddressMatch::resolve_addr(byte, addr));
+        }
         self.adv_cycles(1); // Each write uses one CPU cycle
     }
 }
@@ -98,7 +100,7 @@ pub struct Cpu {
     p: u8,
 }
 
-impl fmt::Debug for Cpu {
+/* impl fmt::Debug for Cpu {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(f, "{}\t{}\t{}\t{}\t{}\t{}{} {} {} {} {} {} {}",
                  "Opcode","PC","SP","A","X","Y\t", "N\t","D\t","I\t","Z\t","C\t","P\t","Cycles")?;
@@ -108,7 +110,7 @@ impl fmt::Debug for Cpu {
                  self.flags.zero, self.flags.carry, self.p, self.cycles)?;
         Ok(())
     }
-}
+} */
 
 impl Cpu {
     pub fn default() -> Cpu {
@@ -143,6 +145,7 @@ pub struct ExecutionContext {
     pub ram: Ram,
     pub ppu: Ppu,
     pub apu: Apu,
+    debug: bool,
 }
 impl ExecutionContext {
     pub fn new() -> ExecutionContext {
@@ -152,6 +155,7 @@ impl ExecutionContext {
             ram: Ram::default(),
             ppu: Ppu::default(),
             apu: Apu::default(),
+            debug: false
         }
     }
     // Helper functions for incrementing and decrementing PC register and cycle count.
@@ -165,7 +169,9 @@ impl ExecutionContext {
             _ => { /* println!("Advancing PC with offset:{:04x}", amount); */ amount }
         }
     }
-    fn adv_cycles(&mut self, cycles: u16) { self.cpu.cycles = self.cpu.cycles.wrapping_add(cycles); }
+    fn adv_cycles(&mut self, cycles: u16) {
+        self.cpu.cycles = self.cpu.cycles.wrapping_add(cycles);
+    }
 
     // Addressing modes
     fn imm(&mut self) -> u16 { self.adv_pc(1) }
@@ -227,11 +233,23 @@ impl ExecutionContext {
         let imm = self.imm();
         let opcode = self.read(imm);
         self.cpu.opcode = opcode;
-        // println!("{:02x} {:02x } {:02x}", opcode, self.read(imm +1), self.read(imm +2));
+        self.cpu.p = self.get_status_flags();
+        self.cpu.reg.prev_pc = self.cpu.reg.pc;
 
+        // Make debug printing look like Nintendulator
+        if !self.debug {
+            let addr = self.cpu.reg.pc;
+            let val = self.read((addr & 0xFF00) as u16) | (self.read(addr + 1) & 0x00FF);
+            print!("{:04X} {:0X}", self.cpu.reg.pc - 1, opcode);
+            print!(" {:0X} {:0X} ", self.read(self.cpu.reg.pc), self.read(self.cpu.reg.pc + 1));
+            print!(" {}", Instruction::short_mnemonic(opcode));
+            print!(" A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X}",
+                   self.cpu.reg.a, self.cpu.reg.x, self.cpu.reg.y, self.cpu.p, self.cpu.reg.sp);
+            println!();
+        }
         // Debug print CPU values
-        println!("{}", Instruction::mnemonic(opcode));
-        println!("{:?}", self.cpu);
+        // print!("${:0X}{:0X}", self.read(self.cpu.reg.pc + 1), self.read(self.cpu.reg.pc));
+        // println!("{:?}", self.cpu);
         // Print flag values for referencing other emulators
         // println!("P:{:02x}", self.get_status_flags());
         self.cpu.p = self.get_status_flags();
