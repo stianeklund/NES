@@ -5,6 +5,7 @@ use rom::Cartridge;
 use ppu::{Ppu, FrameBuffer};
 use apu::Apu;
 use std::fmt;
+
 impl MemoryMapper for ExecutionContext {
     fn read(&mut self, addr: u16) -> u8 {
         self.adv_cycles(1);
@@ -48,9 +49,9 @@ impl MemoryMapper for ExecutionContext {
             0x8000 ..= 0xffff => self.cart.prg[addr as usize & 0x3fff] = byte,
             _ => eprintln!("Trying to write to memory address {:04x}", addr),
         };
-        // Print out written values at resolved addresses
-        // println!("{}", AddressMatch::resolve_addr(byte, addr));
-        self.adv_cycles(1); // Advance cycle for each write
+        // Print known address names
+        println!("{}", AddressMatch::resolve_addr(byte, addr));
+        self.adv_cycles(1); // Each write uses one CPU cycle
     }
 }
 
@@ -153,34 +154,27 @@ impl ExecutionContext {
             apu: Apu::default(),
         }
     }
-    fn adv_pc(&mut self, amount: u16) { self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(amount); }
+    // Helper functions for incrementing and decrementing PC register and cycle count.
+    fn adv_pc(&mut self, amount: u16) -> u16 {
+        self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(amount);
+        // Return the immediate value
+        match amount {
+            1 => self.cpu.reg.pc - 1,
+            2 => self.cpu.reg.pc - 2,
+            // Branching address modes use an offset, return the offset amount here
+            _ => { /* println!("Advancing PC with offset:{:04x}", amount); */ amount }
+        }
+    }
     fn adv_cycles(&mut self, cycles: u16) { self.cpu.cycles = self.cpu.cycles.wrapping_add(cycles); }
 
     // Addressing modes
-    fn imm(&mut self) -> u16 {
-        self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(1);
-        self.cpu.reg.pc - 1
-    }
-    fn imm16(&mut self) -> u16 {
-        self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(2);
-        self.cpu.reg.pc - 2
-    }
-    fn abs(&mut self) -> u16 {
-        let imm16 = self.imm16();
-        self.read16(imm16) as u16
-    }
-    pub fn zp(&mut self) -> u16 {
-        let imm = self.imm();
-        (self.read(imm) & 0xff) as u16
-    }
-    pub fn zpx(&mut self) -> u16 {
-        let imm = self.imm();
-        self.read(imm) as u16 + self.cpu.reg.x as u16 & 0xff
-    }
-    pub fn zpy(&mut self) -> u16 {
-        let imm = self.imm();
-        self.read16(imm as u16) + self.cpu.reg.y as u16 & 0xff
-    }
+    fn imm(&mut self) -> u16 { self.adv_pc(1) }
+    fn imm16(&mut self) -> u16 { self.adv_pc(2) }
+    fn abs(&mut self) -> u16 { let imm16 = self.imm16(); self.read16(imm16) as u16 }
+    pub fn zp(&mut self) -> u16 { let imm = self.imm(); (self.read(imm) & 0xff) as u16 }
+    pub fn zpx(&mut self) -> u16 { let imm = self.imm(); self.read(imm) as u16 + self.cpu.reg.x as u16 & 0xff }
+    pub fn zpy(&mut self) -> u16 { let imm = self.imm(); self.read16(imm as u16) + self.cpu.reg.y as u16 & 0xff }
+
     pub fn absx(&mut self) -> (u16, bool) {
         let imm16 = self.imm16();
         let value = self.read16(imm16) + self.cpu.reg.x as u16;
@@ -233,7 +227,7 @@ impl ExecutionContext {
         let imm = self.imm();
         let opcode = self.read(imm);
         self.cpu.opcode = opcode;
-        println!("{:02x} {:02x } {:02x}", opcode, self.read(imm +1), self.read(imm +2));
+        // println!("{:02x} {:02x } {:02x}", opcode, self.read(imm +1), self.read(imm +2));
 
         // Debug print CPU values
         println!("{}", Instruction::mnemonic(opcode));
@@ -243,7 +237,7 @@ impl ExecutionContext {
         self.cpu.p = self.get_status_flags();
         self.cpu.reg.prev_pc = self.cpu.reg.pc;
 
-        let mut m; // store address mode in m variable
+        let m:u16;  // store address mode in m variable
         match opcode {
             0x00 => self.brk(),
             0x01 => { m = self.indirect_y().0; self.ora(m); },
@@ -449,9 +443,9 @@ impl ExecutionContext {
     // Branch if Carry Set
     fn bcs(&mut self, value: u16) {
         if self.cpu.flags.carry {
-            let offset = self.read(value) as i8 as u16;
             self.cpu.reg.prev_pc = self.cpu.reg.pc;
-            self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
+            let offset = self.read(value) as i8 as u16;
+            self.adv_pc(offset);
         }
     }
     fn bcc(&mut self, value: u16) {
@@ -459,7 +453,9 @@ impl ExecutionContext {
             self.cpu.reg.prev_pc = self.cpu.reg.pc;
             let offset = self.read(value) as i8 as u16;
             self.cpu.reg.prev_pc = self.cpu.reg.pc;
-            self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
+            self.adv_pc(offset);
+            self.adv_pc(offset); // Is this the same?
+            // self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
             self.adv_cycles(1);
         }
         self.adv_cycles(2);
@@ -469,7 +465,8 @@ impl ExecutionContext {
         if self.cpu.flags.zero {
             self.cpu.reg.prev_pc = self.cpu.reg.pc;
             let offset = self.read(value) as i8 as u16;
-            self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
+            // self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
+            self.adv_pc(offset);
             self.adv_cycles(1);
         }
         self.adv_cycles(2);
@@ -492,7 +489,7 @@ impl ExecutionContext {
         if !self.cpu.flags.negative {
             let offset = self.read(value) as i8 as u16;
             self.cpu.reg.prev_pc = self.cpu.reg.pc;
-            self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
+            self.adv_pc(offset);
             self.adv_cycles(3);
         } else {
             self.adv_cycles(2);
@@ -518,7 +515,8 @@ impl ExecutionContext {
         if !self.cpu.flags.zero {
             let offset = self.read(value) as i8 as u16;
             self.cpu.reg.prev_pc = self.cpu.reg.pc;
-            self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
+            // self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
+            self.adv_pc(offset);
             self.adv_cycles(3);
         } else {
             self.adv_cycles(2)
@@ -529,7 +527,8 @@ impl ExecutionContext {
         if !self.cpu.flags.overflow {
             let offset = self.read(value) as i8 as u16;
             self.cpu.reg.prev_pc = self.cpu.reg.pc;
-            self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
+            // self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
+            self.adv_pc(offset);
             self.adv_cycles(3);
         } else {
             self.adv_cycles(2);
@@ -541,7 +540,8 @@ impl ExecutionContext {
         if self.cpu.flags.overflow {
             let offset = self.read(value) as i8 as u16;
             self.cpu.reg.prev_pc = self.cpu.reg.pc;
-            self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
+            // self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
+            self.adv_pc(offset);
             self.adv_cycles(3);
         } else {
             self.adv_cycles(2);
@@ -723,9 +723,7 @@ impl ExecutionContext {
         self.cpu.flags.interrupt = sp & 0x04 != 0;
         self.cpu.flags.decimal = sp & 0x01 != 0;
     }
-    fn sed(&mut self) {
-        self.cpu.flags.decimal = true;
-    }
+    fn sed(&mut self) { self.cpu.flags.decimal = true; }
 
     fn sbc(&mut self, value: u16) {
         // XOR memory value with 255 to set if result is 0 to 255, or clear if less than 0.
@@ -733,7 +731,6 @@ impl ExecutionContext {
         let (result, overflow) = a.overflowing_add(value ^ 0xffu16.wrapping_add(self.cpu.flags.carry as u16));
 
         self.cpu.flags.overflow = overflow;
-
         self.cpu.reg.a = result as u8;
         self.cpu.flags.carry = (self.cpu.reg.a & 0x01) != 0;
         self.cpu.flags.negative = (self.cpu.reg.a & 0x80) != 0;
@@ -894,6 +891,7 @@ impl ExecutionContext {
         self.cpu.reg.prev_pc = self.cpu.reg.pc;
         self.cpu.reg.pc = value;
     }
+
     fn sec(&mut self) { self.cpu.flags.carry = true; }
     fn sei(&mut self) { self.cpu.flags.interrupt = true; }
 

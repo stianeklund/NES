@@ -146,8 +146,8 @@ impl Debug for Registers {
 // TODO Improve mapper to handle writes to registers that have write enable
 impl MemoryMapper for Ppu {
         fn read(&mut self, addr: u16) -> u8 {
-            // println!("PPU Read ${:04x}", addr);
-            self.cycle.wrapping_add(1);
+            println!("PPU Read ${:04x}", addr);
+            self.cycle = self.cycle.wrapping_add(1);
         match addr {
             0 ..= 0x1fff => self.chr[addr as usize],
             // TODO PPU Mirror? Is PPU size to `$3fff`?

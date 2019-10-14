@@ -20,7 +20,7 @@ pub struct AddressMatch {
     lookup: String
 }
 impl AddressMatch {
-    fn resolve_addr(byte: u8, addr: u16) -> String {
+    pub fn resolve_addr(byte: u8, addr: u16) -> String {
 
         // Resolve known addresses for debug purposes
         let lookup = String::from(match addr {
