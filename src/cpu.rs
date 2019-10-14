@@ -5,6 +5,11 @@ use rom::Cartridge;
 use ppu::{Ppu, FrameBuffer};
 use apu::Apu;
 use std::fmt;
+use std::fs::File;
+use std::io::{self, Write};
+use std::convert::TryInto;
+use log::{info, warn, debug};
+
 
 impl MemoryMapper for ExecutionContext {
     fn read(&mut self, addr: u16) -> u8 {
@@ -238,15 +243,19 @@ impl ExecutionContext {
 
         // Make debug printing look like Nintendulator
         if !self.debug {
-            let addr = self.cpu.reg.pc;
-            let val = self.read((addr & 0xFF00) as u16) | (self.read(addr + 1) & 0x00FF);
-            print!("{:04X} {:0X}", self.cpu.reg.pc - 1, opcode);
-            print!(" {:0X} {:0X} ", self.read(self.cpu.reg.pc), self.read(self.cpu.reg.pc + 1));
-            print!(" {}", Instruction::short_mnemonic(opcode));
-            print!(" A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X}",
-                   self.cpu.reg.a, self.cpu.reg.x, self.cpu.reg.y, self.cpu.p, self.cpu.reg.sp);
-            println!();
+           // let addr = self.cpu.reg.pc;
+           //  let val = self.read((addr & 0xFF00) as u16) | (self.read(addr + 1) & 0x00FF);
+
+            // format!("{:04X} {:0X}", self.cpu.reg.pc - 1, opcode));
+            info!("{:04X}  {:02X} {:02X} {:02X} {} A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X}",
+                  self.cpu.reg.pc - 1, opcode,
+                  self.read(self.cpu.reg.pc),
+                  self.read(self.cpu.reg.pc + 1),
+                  Instruction::short_mnemonic(opcode),
+                  self.cpu.reg.a, self.cpu.reg.x, self.cpu.reg.y,
+                  self.cpu.p, self.cpu.reg.sp);
         }
+
         // Debug print CPU values
         // print!("${:0X}{:0X}", self.read(self.cpu.reg.pc + 1), self.read(self.cpu.reg.pc));
         // println!("{:?}", self.cpu);
@@ -470,10 +479,11 @@ impl ExecutionContext {
         if !self.cpu.flags.carry {
             self.cpu.reg.prev_pc = self.cpu.reg.pc;
             let offset = self.read(value) as i8 as u16;
+            if self.debug {
+                debug!("Offset {:04x}", offset);
+            }
             self.cpu.reg.prev_pc = self.cpu.reg.pc;
             self.adv_pc(offset);
-            self.adv_pc(offset); // Is this the same?
-            // self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
             self.adv_cycles(1);
         }
         self.adv_cycles(2);

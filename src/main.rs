@@ -1,6 +1,7 @@
 extern crate minifb;
+extern crate log;
+extern crate flexi_logger;
 
-mod lib;
 mod rom;
 mod interconnect;
 mod opcode;
@@ -14,6 +15,8 @@ use std::io::{self, Read};
 use std::fs::File;
 use interconnect::{Interconnect, MemoryMapper};
 use cpu::ExecutionContext;
+use flexi_logger::{Logger, LogTarget, default_format};
+use log::{info, warn, debug};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -25,6 +28,13 @@ fn main() {
     let path = Path::new(file);
     let mut f = File::open(&path).expect("Unable to find ROM");
 
+    // TODO Use logging for general purpose not debugging
+    Logger::with_str("nes")
+        .log_to_file()
+        .directory("log")
+        .format(default_format)
+        .start()
+        .unwrap();
 
     // TODO Cleanup use interconnect instead
     // Make CPU more ergonomic to use.

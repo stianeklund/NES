@@ -5,3 +5,6 @@ authors = ["Stian Eklund <stian.eklund@gmail.com>"]
 
 [dependencies]
 minifb = "0.10.0"
+flexi_logger = "0.14"
+log = "0.4"
+
