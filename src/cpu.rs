@@ -178,7 +178,6 @@ impl ExecutionContext {
         self.cpu.cycles = self.cpu.cycles.wrapping_add(cycles);
     }
 
-
     // Addressing modes
     fn imm(&mut self) -> u16 { self.adv_pc(1) }
     fn imm16(&mut self) -> u16 { self.adv_pc(2) }
@@ -499,10 +498,16 @@ impl ExecutionContext {
             let offset = self.read(value) as i8 as u16;
             // self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
             self.adv_pc(offset);
+        }
+        // TODO Double check cycles
+        // Have we crossed a boundary?
+        if self.cpu.reg.prev_pc & 0xFF00 != self.cpu.reg.pc & 0xFF00 {
+            self.adv_cycles(2);
+        } else {
             self.adv_cycles(1);
         }
-        self.adv_cycles(2);
     }
+
     // Branch if Minus
     fn bmi(&mut self, value: u16) {
         // 2 cycles (+ 1 if branch succeeds, +2 if to a new page)
@@ -589,7 +594,7 @@ impl ExecutionContext {
     fn cmp(&mut self, value: u16) {
         let value = self.read(value);
         let result = self.cpu.reg.a.wrapping_sub(value as u8);
-        self.cpu.flags.zero = self.cpu.reg.a == 0;
+        self.cpu.flags.zero = result == 0;
         self.cpu.flags.carry = self.cpu.reg.a >= value;
         self.cpu.flags.negative = result & 0x80 != 0;
     }
