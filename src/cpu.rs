@@ -270,7 +270,7 @@ impl ExecutionContext {
 
         let m:u16;  // store address mode in m variable
         match opcode {
-            0x00 => self.brk(),
+            0x00 => {m = self.imm(); self.brk(m) },
             0x01 => { m = self.indirect_y().0; self.ora(m); },
             0x02 => ::std::process::exit(0x100),
             0x03 => { m = self.indirect_y().0; self.slo(m); },
@@ -532,11 +532,14 @@ impl ExecutionContext {
             self.adv_cycles(2);
         }
     }
-    fn brk(&mut self) {
-        let addr = self.cpu.reg.pc.wrapping_add(1);
-        self.push_word(addr);
+    fn brk(&mut self, value:u16) {
         self.cpu.flags.brk = true;
+
+        self.push_word(value);
+        // Set PC to IRQ vector
         self.cpu.reg.pc = self.read16(0xfffe);
+        // For now Panic here
+        panic!("BRK");
     }
     // Test Bits N Z V
     fn bit(&mut self, value: u16) {
@@ -743,14 +746,15 @@ impl ExecutionContext {
         self.cpu.flags.carry = (result & 0x01) != 0;
     }
     fn rts(&mut self) {
-        let addr = self.pop16().wrapping_add(1);
+        // let addr = self.pop16().wrapping_add(1);
         // Set program counter for debug output
         self.cpu.reg.prev_pc = self.cpu.reg.pc;
-        self.cpu.reg.pc = addr as u16;
+        self.cpu.reg.pc = self.pop16() + 1;
         self.adv_cycles(6);
     }
     // Return from interrupt
     fn rti(&mut self, _value: u16) {
+        // TODO value is not used
         // Pull processor flags from stack
         self.pop_byte();
 
@@ -848,10 +852,10 @@ impl ExecutionContext {
     fn pop_byte(&mut self) -> u8 {
         let sp = self.cpu.reg.sp;
         self.cpu.reg.sp = sp.wrapping_add(1);
-        self.read(self.cpu.reg.sp as u16)
+        self.read(0x100u16.wrapping_add(self.cpu.reg.sp as u16))
     }
     fn pop16(&mut self) -> u16 {
-        ((self.pop_byte() as u16) | (self.pop_byte() as u16) << 8)
+        (self.pop_byte() as u16) | (self.pop_byte() as u16).wrapping_shl(8)
     }
     // Push accumulator
     fn pha(&mut self) { self.push_byte(self.cpu.reg.a); }
@@ -869,8 +873,11 @@ impl ExecutionContext {
     fn set_status_flags(&mut self, value: u8) {
         self.cpu.flags.negative = value & 0x80 == 0x80;
         self.cpu.flags.overflow = value & 0x40 == 0x40;
-        self.cpu.flags.reserved = value & 0x20 == 0x20;
-        self.cpu.flags.brk = value & 0x10 == 0x10;
+        // TODO FIX BRK & Reserved are not actual flags but exist in stack copies
+        // They only exist when pushing the status register onto the stack!
+
+        // self.cpu.flags.reserved = value & 0x20 == 0x20;
+        // self.cpu.flags.brk = value & 0x10 == 0x10;
         self.cpu.flags.decimal = value & 0x08 == 0x08;
         self.cpu.flags.interrupt = value & 0x04 == 0x04;
         self.cpu.flags.zero = value & 0x02 == 0x02;
