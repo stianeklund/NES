@@ -434,17 +434,20 @@ impl ExecutionContext {
         let (result, overflow) = a.overflowing_add((self.read(value) as u16).wrapping_add(self.cpu.flags.carry as u16));
         self.cpu.reg.a = result as u8;
 
-        self.cpu.flags.carry = (self.cpu.reg.a & 0x01) != 0;
-        self.cpu.flags.negative = (self.cpu.reg.a & 0x80) != 0;
-        self.cpu.flags.zero = (self.cpu.reg.a & 0xff) == 0;
+        self.cpu.flags.carry = a >= result;
+        self.cpu.flags.negative = result & 0x80 != 0;
+        self.cpu.flags.zero = self.cpu.reg.a == 0;
+        // Check 7th bit for overflow per documentation
+        // TODO check if this is correct
+        self.cpu.flags.overflow = (result & 0x80) != 0;
         // Set to 1 if last ADC resulted in a signed overflow
-        self.cpu.flags.overflow = overflow;
+        // self.cpu.flags.overflow = overflow;
     }
     // ASL (Accumulator) helper function for ASL Accumulator
     fn asla(&mut self) {
         let data = self.cpu.reg.a << 1;
         self.cpu.flags.carry = data >> 1 & 0xfe != 0;
-        self.cpu.flags.negative;
+        self.cpu.flags.negative = data & 0x80 != 0;
         self.cpu.reg.a = data as u8;
     }
 
@@ -456,7 +459,7 @@ impl ExecutionContext {
         let value = self.read(addr as u16);
         self.write(addr as u16, value as u8);
         self.cpu.flags.carry = value >> 1 & 0xfe != 0;
-        self.cpu.flags.negative = (value << 1 & 0x80) != 0;
+        self.cpu.flags.negative = value & 0x80 != 0;
         self.cpu.flags.zero = (self.cpu.reg.a & 0xff) == 0;
 
         // Shift data left by one and write it back to memory
@@ -499,15 +502,15 @@ impl ExecutionContext {
             // self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
             self.adv_pc(offset);
         }
-        // TODO Double check cycles
-        // Have we crossed a boundary?
+        self.check_branch();
+    }
+    fn check_branch(&mut self) {
         if self.cpu.reg.prev_pc & 0xFF00 != self.cpu.reg.pc & 0xFF00 {
             self.adv_cycles(2);
         } else {
             self.adv_cycles(1);
         }
     }
-
     // Branch if Minus
     fn bmi(&mut self, value: u16) {
         // 2 cycles (+ 1 if branch succeeds, +2 if to a new page)
@@ -515,22 +518,24 @@ impl ExecutionContext {
         if self.cpu.flags.negative {
             self.cpu.reg.prev_pc = self.cpu.reg.pc;
             let offset = self.read(value) as i8 as u16;
-            self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
+            self.adv_pc(offset);
             self.adv_cycles(1);
         } else {
-        }
         self.adv_cycles(2);
+        }
+        self.check_branch();
     }
     // Branch on Plus (if positive)
     fn bpl(&mut self, value: u16) {
         if !self.cpu.flags.negative {
-            let offset = self.read(value) as i8 as u16;
             self.cpu.reg.prev_pc = self.cpu.reg.pc;
+            let offset = self.read(value) as i8 as u16;
             self.adv_pc(offset);
             self.adv_cycles(3);
         } else {
             self.adv_cycles(2);
         }
+        self.check_branch();
     }
     fn brk(&mut self, value:u16) {
         self.cpu.flags.brk = true;
@@ -628,7 +633,7 @@ impl ExecutionContext {
     fn dey(&mut self) {
         self.cpu.reg.y = self.cpu.reg.y.wrapping_sub(1);
         self.cpu.flags.negative = (self.cpu.reg.y & 0x80) != 0;
-        self.cpu.flags.zero = self.cpu.reg.y & 0xff == 0;
+        self.cpu.flags.zero = self.cpu.reg.y == 0;
     }
     // Decrement X register
     fn dex(&mut self) {
@@ -655,7 +660,7 @@ impl ExecutionContext {
         // (Sub-instructions: LDA, LDX)
         self.cpu.reg.a = self.read(value);
         self.cpu.reg.x = self.read(value);
-        self.cpu.flags.zero = (value & 0xff) == 0;
+        self.cpu.flags.zero = value == 0;
         self.cpu.flags.negative = (value & 0x80) != 0;
     }
     fn ldy(&mut self, value: u16) {
@@ -666,7 +671,7 @@ impl ExecutionContext {
     fn ldx(&mut self, value: u16) {
         let result = self.read(value);
         self.cpu.reg.x = result;
-        self.cpu.flags.zero = (result & 0xff) == 0;
+        self.cpu.flags.zero = result == 0;
         self.cpu.flags.negative = (result & 0x80) != 0;
     }
     fn lda(&mut self, value: u16) {
