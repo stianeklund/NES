@@ -247,7 +247,8 @@ impl ExecutionContext {
             // let addr = self.cpu.reg.pc;
             //  let val = self.read((addr & 0xFF00) as u16) | (self.read(addr + 1) & 0x00FF);
             // format!("{:04X} {:0X}", self.cpu.reg.pc - 1, opcode));
-            info!("{:04X}  {:0X} {:02X}  {} A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X}",
+
+            info!("{:04X}  {:0X} {:02X}     {} A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X}",
                   self.cpu.reg.pc - 1, opcode, // Addr
                   self.read(self.cpu.reg.pc),  // Operand
                   Instruction::short_mnemonic(opcode),
@@ -428,20 +429,18 @@ impl ExecutionContext {
             _ => unimplemented!("Unknown opcode:{:04x}", opcode),
         }
     }
-
     fn adc(&mut self, value: u16) {
         let a = self.cpu.reg.a as u16;
-        let (result, overflow) = a.overflowing_add((self.read(value) as u16).wrapping_add(self.cpu.flags.carry as u16));
+        let operand = self.read(value);
+        let result = self.cpu.reg.a.wrapping_add(operand).wrapping_add(self.cpu.flags.carry as u8);
         self.cpu.reg.a = result as u8;
 
-        self.cpu.flags.carry = a >= result;
+        // Set overflow flag when A and the operand have the same sign
+        // and A and the result have different sign
+        self.cpu.flags.overflow = !(a ^ operand as u16) & (a ^ result as u16) & 0x80 != 0;
+        self.cpu.flags.carry = a >= result as u16;
         self.cpu.flags.negative = result & 0x80 != 0;
         self.cpu.flags.zero = self.cpu.reg.a == 0;
-        // Check 7th bit for overflow per documentation
-        // TODO check if this is correct
-        self.cpu.flags.overflow = (result & 0x80) != 0;
-        // Set to 1 if last ADC resulted in a signed overflow
-        // self.cpu.flags.overflow = overflow;
     }
     // ASL (Accumulator) helper function for ASL Accumulator
     fn asla(&mut self) {
@@ -563,18 +562,13 @@ impl ExecutionContext {
         }
         // TODO Double check cycles
         // Have we crossed a boundary?
-        if self.cpu.reg.prev_pc & 0xFF00 != self.cpu.reg.pc & 0xFF00 {
-            self.adv_cycles(2);
-        } else {
-            self.adv_cycles(1);
-        }
+        self.check_branch();
     }
     // Branch on overflow clear
     fn bvc(&mut self, value: u16) {
         if !self.cpu.flags.overflow {
             let offset = self.read(value) as i8 as u16;
             self.cpu.reg.prev_pc = self.cpu.reg.pc;
-            // self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
             self.adv_pc(offset);
             self.adv_cycles(3);
         } else {
@@ -587,7 +581,6 @@ impl ExecutionContext {
         if self.cpu.flags.overflow {
             let offset = self.read(value) as i8 as u16;
             self.cpu.reg.prev_pc = self.cpu.reg.pc;
-            // self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
             self.adv_pc(offset);
             self.adv_cycles(3);
         } else {
@@ -611,16 +604,16 @@ impl ExecutionContext {
     fn cpx(&mut self, value: u16) {
         let value = self.read(value);
         let result = self.cpu.reg.x.wrapping_sub(value as u8);
-        self.cpu.flags.zero = self.cpu.reg.x == 0;
-        self.cpu.flags.carry = self.cpu.reg.x >= value;
+        self.cpu.flags.zero = result == 0;
+        self.cpu.flags.carry = self.cpu.reg.x>= value;
         self.cpu.flags.negative = result & 0x80 != 0;
     }
     fn cpy(&mut self, value: u16) {
-        let y = self.cpu.reg.y;
         let value = self.read(value);
-        let result = y.wrapping_sub(value);
-        self.cpu.flags.zero = self.cpu.reg.y == result ;
-        self.cpu.flags.carry = self.cpu.reg.y>= value;
+        let result = self.cpu.reg.y.wrapping_sub(value as u8);
+        self.cpu.flags.zero = result == 0;
+        // self.cpu.flags.zero = y == value;
+        self.cpu.flags.carry = self.cpu.reg.y >= value;
         self.cpu.flags.negative = result & 0x80 != 0;
     }
 
@@ -658,15 +651,17 @@ impl ExecutionContext {
         // Load both the accumulator and the X register with contents of a memory location
         // Part of the undocumented 6502 opcodes
         // (Sub-instructions: LDA, LDX)
-        self.cpu.reg.a = self.read(value);
-        self.cpu.reg.x = self.read(value);
-        self.cpu.flags.zero = value == 0;
-        self.cpu.flags.negative = (value & 0x80) != 0;
+        let result = self.read(value);
+        self.cpu.reg.a = result as u8;
+        self.cpu.reg.x = result as u8;
+        self.cpu.flags.zero = result == 0;
+        self.cpu.flags.negative = (result & 0x80) != 0;
     }
     fn ldy(&mut self, value: u16) {
-        self.cpu.reg.y = self.read(value);
-        self.cpu.flags.zero = (value & 0xff) == 0;
-        self.cpu.flags.negative = (value & 0x80) != 0;
+        let result = self.read(value);
+        self.cpu.reg.y = result;
+        self.cpu.flags.zero = (result & 0xff) == 0;
+        self.cpu.flags.negative = (result & 0x80) != 0;
     }
     fn ldx(&mut self, value: u16) {
         let result = self.read(value);
@@ -681,12 +676,13 @@ impl ExecutionContext {
         self.cpu.flags.negative = (result & 0x80) != 0;
     }
     fn lsr(&mut self, value: u16) {
-        let data: u8 =  value as u8;
-        let result = (data >> 1) | ((self.cpu.flags.carry as u8) << 7);
+        let data: u8 =  self.read(value);
+        let result = data >> 1;
         self.write(value as u16, result);
+
         self.cpu.flags.negative = (result & 0x80) != 0;
-        self.cpu.flags.zero = (result & 0xff) == 0;
-        self.cpu.flags.carry = data & 1 != 0;
+        self.cpu.flags.zero = result == 0;
+        self.cpu.flags.carry = data & 0x1 != 0;
     }
 
     // Logical Shift Right (Accumulator)
@@ -761,28 +757,31 @@ impl ExecutionContext {
     fn rti(&mut self, _value: u16) {
         // TODO value is not used
         // Pull processor flags from stack
-        self.pop_byte();
-
-        let sp = self.cpu.reg.sp;
+        let flags = self.pop_byte();
+        self.set_status_flags(flags);
+        self.cpu.reg.pc = self.pop16();
         // TODO Check bitmask
-        self.cpu.flags.negative = sp & 0x80 != 0;
-        self.cpu.flags.zero = sp & 0x40 != 0;
-        self.cpu.flags.carry = sp & 0x10 != 0;
-        self.cpu.flags.interrupt = sp & 0x04 != 0;
-        self.cpu.flags.decimal = sp & 0x01 != 0;
+        // self.cpu.flags.negative = sp & 0x80 != 0;
+        // self.cpu.flags.zero = sp & 0x40 != 0;
+        // self.cpu.flags.carry = sp & 0x10 != 0;
+        // self.cpu.flags.interrupt = sp & 0x04 != 0;
+        // self.cpu.flags.decimal = sp & 0x01 != 0;
     }
     fn sed(&mut self) { self.cpu.flags.decimal = true; }
 
     fn sbc(&mut self, value: u16) {
-        // XOR memory value with 255 to set if result is 0 to 255, or clear if less than 0.
         let a = self.cpu.reg.a as u16;
-        let (result, overflow) = a.overflowing_add(value ^ 0xffu16.wrapping_add(self.cpu.flags.carry as u16));
-
-        self.cpu.flags.overflow = overflow;
+        let operand = !self.read(value);
+        let result = self.cpu.reg.a.wrapping_add(operand).wrapping_add(self.cpu.flags.carry as u8);
+        // TODO This doesn't work, find out why
+        //if result > 255 { self.cpu.flags.carry = true; }
         self.cpu.reg.a = result as u8;
-        self.cpu.flags.carry = (self.cpu.reg.a & 0x01) != 0;
-        self.cpu.flags.negative = (self.cpu.reg.a & 0x80) != 0;
-        self.cpu.flags.zero = (self.cpu.reg.a & 0xff) == 0;
+        self.cpu.flags.overflow = !(a ^ operand as u16) & (a ^ result as u16) & 0x80 != 0;
+       //  self.cpu.flags.overflow = (a ^ operand) & (a ^ result) & 0x80 != 0;
+        // Check if there's a carry between bit 6 & 7 and the operand is not 0 set carry
+        self.cpu.flags.carry = (result as u16) <= (a as u16) && operand != 0;
+        self.cpu.flags.negative = result & 0x80 != 0;
+        self.cpu.flags.zero = result == 0;
     }
     // SLO Accumulator
     fn sloa(&mut self, value: u16) {
@@ -799,15 +798,13 @@ impl ExecutionContext {
         self.cpu.flags.carry = result & 0x80 != 0;
         self.cpu.flags.zero = result & 0xff == 0;
     }
-    // TODO Check cpu flags (if we need to check zero & negative on zero page, x addr mode
-    fn sta(&mut self, value: u16) { self.write(value, self.cpu.reg.a); }
-    fn sty(&mut self, value: u16) { self.write(value, self.cpu.reg.y); }
-    // TODO Check cpu flags (if we need to check zero & negative on zero page, x addr mode
-    fn stx(&mut self, value: u16) { self.write(value, self.cpu.reg.x); }
+    fn sta(&mut self, addr: u16) { self.write(addr, self.cpu.reg.a); }
+    fn sty(&mut self, addr: u16) { self.write(addr, self.cpu.reg.y); }
+    fn stx(&mut self, addr: u16) { self.write(addr, self.cpu.reg.x); }
     // Transfer Accumulator to X
     fn tax(&mut self) {
         self.cpu.reg.x = self.cpu.reg.a;
-        self.cpu.flags.zero = (self.cpu.reg.x & 0xff) == 0;
+        self.cpu.flags.zero = self.cpu.reg.x == 0;
         self.cpu.flags.negative = (self.cpu.reg.x & 0x80) != 0;
     }
     // Transfer Y to Accumulator
@@ -829,23 +826,18 @@ impl ExecutionContext {
         self.cpu.flags.negative = (self.cpu.reg.a & 0x80) != 0;
     }
     // Transfer X to Stack Pointer
-    fn txs(&mut self) {
-        let src = self.cpu.reg.x;
-        self.cpu.flags.negative = (src & 0x80) != 0;
-        self.cpu.flags.zero = (src & 0xff) != 0;
-        self.cpu.reg.sp = self.cpu.reg.x;
-    }
+    fn txs(&mut self) { self.cpu.reg.sp = self.cpu.reg.x; }
     // Transfer Stack Pointer to X
     fn tsx(&mut self) {
-        let src = self.cpu.reg.sp;
-        self.cpu.flags.negative = (src & 0x80) != 0;
-        self.cpu.flags.zero = (src & 0xff) != 0;
         self.cpu.reg.x = self.cpu.reg.sp;
+        self.cpu.flags.zero = self.cpu.reg.x == 0;
+        self.cpu.flags.negative = (self.cpu.reg.x & 0x80) != 0;
     }
     fn push_word(&mut self, value: u16) {
         let sp = self.cpu.reg.sp;
         self.write_word(0x100 + (sp.wrapping_sub(1)) as u16, value);
         self.cpu.reg.sp = self.cpu.reg.sp.wrapping_sub(2);
+        // info!("SP {:04x}", self.cpu.reg.sp);
     }
     // Push register
     fn push_byte(&mut self, byte: u8) {
@@ -931,12 +923,11 @@ impl ExecutionContext {
     // Jump to Subroutine
     fn jsr(&mut self, value: u16) {
         self.cpu.reg.prev_pc = self.cpu.reg.pc;
-
         // Push to stack
         let pc = self.cpu.reg.pc;
-        self.cpu.reg.prev_pc = self.cpu.reg.pc;
         self.push_word(pc - 1);
         self.cpu.reg.pc = value;
+        self.adv_cycles(6);
     }
     fn jmp(&mut self, value: u16) {
         self.cpu.reg.prev_pc = self.cpu.reg.pc;
