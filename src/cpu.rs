@@ -13,7 +13,7 @@ use log::{info, warn, debug};
 
 impl MemoryMapper for ExecutionContext {
     fn read(&mut self, addr: u16) -> u8 {
-        self.adv_cycles(1); // Why is this being called when reading from main?
+        self.adv_cycles(1);
 
         // See https://wiki.nesdev.com/w/index.php/CPU_memory_map
         match addr {
@@ -50,7 +50,7 @@ impl MemoryMapper for ExecutionContext {
             0x4000 ..= 0x4017 => self.apu.write(addr, byte),
             0x6000 ..= 0x7fff => { self.ram.sram[addr as usize] = byte; },
             // Some tests store ASCII characters in SRAM. Output as characters when writing to SRAM
-           // println!("Status: {:04x}", self.ram.sram[0x6000]);
+            // println!("Status: {:04x}", self.ram.sram[0x6000]);
             0x8000 ..= 0xffff => self.cart.prg[addr as usize & 0x3fff] = byte,
             _ => eprintln!("Trying to write to memory address {:04x}", addr),
         };
@@ -104,7 +104,7 @@ pub struct Cpu {
     opcode: u8,
     p: u8,
 }
-
+// TODO Remove, use logging framework instead
 /* impl fmt::Debug for Cpu {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(f, "{}\t{}\t{}\t{}\t{}\t{}{} {} {} {} {} {} {}",
@@ -178,13 +178,15 @@ impl ExecutionContext {
         self.cpu.cycles = self.cpu.cycles.wrapping_add(cycles);
     }
 
+
     // Addressing modes
     fn imm(&mut self) -> u16 { self.adv_pc(1) }
     fn imm16(&mut self) -> u16 { self.adv_pc(2) }
     fn abs(&mut self) -> u16 { let imm16 = self.imm16(); self.read16(imm16) as u16 }
-    pub fn zp(&mut self) -> u16 { let imm = self.imm(); (self.read(imm) & 0xff) as u16 }
-    pub fn zpx(&mut self) -> u16 { let imm = self.imm(); self.read(imm) as u16 + self.cpu.reg.x as u16 & 0xff }
-    pub fn zpy(&mut self) -> u16 { let imm = self.imm(); self.read16(imm as u16) + self.cpu.reg.y as u16 & 0xff }
+    // pub fn zp(&mut self) -> u16 { let imm = self.imm(); (self.read(imm) & 0xff) as u16 }
+    pub fn zp(&mut self) -> u16 { let imm = self.imm(); (self.read(imm) & 0xff as u8).into() }
+    pub fn zpx(&mut self) -> u16 { let imm = self.imm(); (self.read(imm) as u16 + self.cpu.reg.x as u16) & 0xff }
+    pub fn zpy(&mut self) -> u16 { let imm = self.imm(); (self.read16(imm as u16) + self.cpu.reg.y as u16) & 0xff }
 
     pub fn absx(&mut self) -> (u16, bool) {
         let imm16 = self.imm16();
@@ -243,19 +245,22 @@ impl ExecutionContext {
 
         // Make debug printing look like Nintendulator
         if !self.debug {
-           // let addr = self.cpu.reg.pc;
-           //  let val = self.read((addr & 0xFF00) as u16) | (self.read(addr + 1) & 0x00FF);
-
+            // let addr = self.cpu.reg.pc;
+            //  let val = self.read((addr & 0xFF00) as u16) | (self.read(addr + 1) & 0x00FF);
             // format!("{:04X} {:0X}", self.cpu.reg.pc - 1, opcode));
-            info!("{:04X}  {:02X} {:02X} {:02X} {} A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X}",
-                  self.cpu.reg.pc - 1, opcode,
-                  self.read(self.cpu.reg.pc),
-                  self.read(self.cpu.reg.pc + 1),
+            info!("{:04X}  {:0X} {:02X}  {} A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X}",
+                  self.cpu.reg.pc - 1, opcode, // Addr
+                  self.read(self.cpu.reg.pc),  // Operand
                   Instruction::short_mnemonic(opcode),
                   self.cpu.reg.a, self.cpu.reg.x, self.cpu.reg.y,
                   self.cpu.p, self.cpu.reg.sp);
         }
 
+        /* if self.cpu.reg.pc <= 0xFFFE {
+                println!(" {:0X} {:0X}", self.read(self.cpu.reg.pc), self.read(self.cpu.reg.pc + 1));
+        } else {
+            println!();
+        } */
         // Debug print CPU values
         // print!("${:0X}{:0X}", self.read(self.cpu.reg.pc + 1), self.read(self.cpu.reg.pc));
         // println!("{:?}", self.cpu);
@@ -460,12 +465,11 @@ impl ExecutionContext {
     }
 
     fn and(&mut self, value: u16) {
-        // let result = self.cpu.reg.a as u16 & self.read(value) as u16;
         let result = self.read(value);
-        let a = self.cpu.reg.a;
-        self.cpu.reg.a = a & result as u8;
-        self.cpu.flags.negative = (result & 0x80) != 0;
-        self.cpu.flags.zero = (result & 0xff) == 0;
+        self.cpu.reg.a &= result as u8;
+        // Check bit 7
+        self.cpu.flags.negative = (self.cpu.reg.a & 0x80) != 0;
+        self.cpu.flags.zero = self.cpu.reg.a == 0;
     }
     // Branch if Carry Set
     fn bcs(&mut self, value: u16) {
@@ -584,21 +588,25 @@ impl ExecutionContext {
     // Compare with accumulator
     fn cmp(&mut self, value: u16) {
         let value = self.read(value);
-        self.cpu.flags.zero = self.cpu.reg.a == value;
+        let result = self.cpu.reg.a.wrapping_sub(value as u8);
+        self.cpu.flags.zero = self.cpu.reg.a == 0;
         self.cpu.flags.carry = self.cpu.reg.a >= value;
-        self.cpu.flags.negative = self.cpu.reg.a as i16 - value as i16 & 0x80 == 0x80;
+        self.cpu.flags.negative = result & 0x80 != 0;
     }
     fn cpx(&mut self, value: u16) {
         let value = self.read(value);
-        self.cpu.flags.zero = self.cpu.reg.x == value;
-        self.cpu.flags.carry = self.cpu.reg.x>= value;
-        self.cpu.flags.negative = self.cpu.reg.x as i16 - value as i16 & 0x80 == 0x80;
+        let result = self.cpu.reg.x.wrapping_sub(value as u8);
+        self.cpu.flags.zero = self.cpu.reg.x == 0;
+        self.cpu.flags.carry = self.cpu.reg.x >= value;
+        self.cpu.flags.negative = result & 0x80 != 0;
     }
     fn cpy(&mut self, value: u16) {
+        let y = self.cpu.reg.y;
         let value = self.read(value);
-        self.cpu.flags.zero = self.cpu.reg.y == value;
+        let result = y.wrapping_sub(value);
+        self.cpu.flags.zero = self.cpu.reg.y == result ;
         self.cpu.flags.carry = self.cpu.reg.y>= value;
-        self.cpu.flags.negative = self.cpu.reg.y as i16 - value as i16 & 0x80 == 0x80;
+        self.cpu.flags.negative = result & 0x80 != 0;
     }
 
     fn dec(&mut self, value: u16) {
@@ -630,11 +638,7 @@ impl ExecutionContext {
         self.cpu.flags.negative = (self.cpu.reg.a & 0x80) != 0;
         self.cpu.flags.zero = (self.cpu.reg.a & 0xff) == 0;
     }
-    fn hlt(&self) {
-        // Halt CPU
-        eprintln!("HLT! Opcode:{:04x}", self.cpu.opcode);
-        ::std::process::exit(0);
-    }
+    fn hlt(&self) { panic!("HLT! Opcode:{:04x}", self.cpu.opcode); }
     fn lax(&mut self, value: u16) {
         // Load both the accumulator and the X register with contents of a memory location
         // Part of the undocumented 6502 opcodes

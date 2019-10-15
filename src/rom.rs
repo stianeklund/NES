@@ -191,7 +191,7 @@ impl Cartridge {
         let header = self.validate_header(&rom).unwrap();
         self.header = header;
 
-        let mut prg_lenght;
+        let prg_lenght;
         // TODO Handle this better. We need to check the sizes here & allocate accordingly.
 
         if self.header.prg_rom_page_size == 1 {

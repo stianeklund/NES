@@ -38,7 +38,7 @@ impl fmt::Debug for Instruction {
 }
 
 impl Instruction {
-    pub fn default() -> Self {
+    pub fn default() ->     Self {
         Instruction {
             opcode: 0,
             bytes: 0,
