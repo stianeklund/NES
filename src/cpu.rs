@@ -548,15 +548,17 @@ impl ExecutionContext {
         self.cpu.flags.overflow = (data & 0x40) != 0;
     }
     fn bne(&mut self, value: u16) {
-        // If zero flag is 0 branch
         if !self.cpu.flags.zero {
-            let offset = self.read(value) as i8 as u16;
             self.cpu.reg.prev_pc = self.cpu.reg.pc;
-            // self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
+            let offset = self.read(value) as i8 as u16;
             self.adv_pc(offset);
-            self.adv_cycles(3);
+        }
+        // TODO Double check cycles
+        // Have we crossed a boundary?
+        if self.cpu.reg.prev_pc & 0xFF00 != self.cpu.reg.pc & 0xFF00 {
+            self.adv_cycles(2);
         } else {
-            self.adv_cycles(2)
+            self.adv_cycles(1);
         }
     }
     // Branch on overflow clear
@@ -846,7 +848,7 @@ impl ExecutionContext {
     fn pop_byte(&mut self) -> u8 {
         let sp = self.cpu.reg.sp;
         self.cpu.reg.sp = sp.wrapping_add(1);
-        self.read(0x100 + self.cpu.reg.sp as u16)
+        self.read(self.cpu.reg.sp as u16)
     }
     fn pop16(&mut self) -> u16 {
         ((self.pop_byte() as u16) | (self.pop_byte() as u16) << 8)
