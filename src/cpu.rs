@@ -201,14 +201,17 @@ impl ExecutionContext {
         }
     }
     pub fn indirect_x(&mut self) -> u16 {
-        let value = self.imm();
+        // TODO Have imm() / imm16() functions do read(pc)
+        let pc = self.imm();
+        let value = self.read(pc);
         let x = self.cpu.reg.x;
-        self.read16((value + x as u16) & 0xff as u16)
+        self.read16((value & 0xff as u8).wrapping_add(x).into())
     }
     pub fn indirect_y(&mut self) -> u16 {
-        let value = self.imm();
+        let pc = self.imm();
+        let value = self.read(pc);
         let y = self.cpu.reg.y;
-        self.read16((value + y as u16) & 0xff as u16)
+        self.read16((value & 0xff as u8).wrapping_add(y).into())
     }
     pub fn indirect(&mut self) -> u16 {
         let abs = self.abs();
@@ -234,7 +237,6 @@ impl ExecutionContext {
                   self.cpu.reg.a, self.cpu.reg.x, self.cpu.reg.y,
                   self.cpu.p, self.cpu.reg.sp);
         }
-
         /* if self.cpu.reg.pc <= 0xFFFE {
                 println!(" {:0X} {:0X}", self.read(self.cpu.reg.pc), self.read(self.cpu.reg.pc + 1));
         } else {
@@ -274,7 +276,7 @@ impl ExecutionContext {
             0x0e => { m = self.abs(); self.asl(m); },
             0x0a => self.asla(),
             0xa0 => { m = self.imm(); self.ldy(m); },
-            0xa1 => { m = self.indirect_y(); self.lda(m); },
+            0xa1 => { m = self.indirect_x(); self.lda(m); },
             0xa2 => { m = self.imm(); self.ldx(m); },
             0xa4 => { m = self.zp(); self.ldy(m); },
             0xa5 => { m = self.zp(); self.lda(m); },
@@ -318,7 +320,6 @@ impl ExecutionContext {
             0x2a => self.rola(),
             0x2c => { m = self.abs(); self.bit(m); },
             0x2e => { m = self.abs(); self.rol(m); },
-
             0x2d => { m = self.abs(); self.and(m); },
             0x30 => { m = self.imm(); self.bmi(m); },
             0x35 => { m = self.zpx(); self.and(m); },
@@ -793,19 +794,19 @@ impl ExecutionContext {
     // Transfer Y to Accumulator
     fn tay(&mut self) {
         self.cpu.reg.y = self.cpu.reg.a;
-        self.cpu.flags.zero = (self.cpu.reg.y & 0xff) == 0;
+        self.cpu.flags.zero = self.cpu.reg.y == 0;
         self.cpu.flags.negative = (self.cpu.reg.y & 0x80) != 0;
     }
     // Transfer Y to Accumulator
     fn tya(&mut self) {
         self.cpu.reg.a = self.cpu.reg.y;
-        self.cpu.flags.zero = (self.cpu.reg.a & 0xff) == 0;
+        self.cpu.flags.zero = self.cpu.reg.a == 0;
         self.cpu.flags.negative = (self.cpu.reg.a & 0x80) != 0;
     }
     // Transfer X to Accumulator
     fn txa(&mut self) {
         self.cpu.reg.a = self.cpu.reg.x;
-        self.cpu.flags.zero = (self.cpu.reg.a & 0xff) == 0;
+        self.cpu.flags.zero = self.cpu.reg.a == 0;
         self.cpu.flags.negative = (self.cpu.reg.a & 0x80) != 0;
     }
     // Transfer X to Stack Pointer
@@ -818,7 +819,7 @@ impl ExecutionContext {
     }
     fn push_word(&mut self, value: u16) {
         let sp = self.cpu.reg.sp;
-        self.write_word(0x100 + (sp.wrapping_sub(1)) as u16, value);
+        self.write_word(0x100 + u16::from(sp.wrapping_sub(1)), value);
         self.cpu.reg.sp = self.cpu.reg.sp.wrapping_sub(2);
         // info!("SP {:04x}", self.cpu.reg.sp);
     }

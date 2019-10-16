@@ -6,7 +6,7 @@ use cpu::{ExecutionContext, Registers};
 pub trait MemoryMapper {
     fn read(&mut self, addr: u16) -> u8 ;
     fn read16(&mut self, addr: u16) -> u16 {
-        (self.read(addr) as u16) | (self.read(addr + 1) as u16) << 8
+        u16::from(self.read(addr)) | u16::from(self.read(addr + 1)) << 8
     }
     fn write(&mut self, addr: u16, byte: u8);
     fn write_word(&mut self, addr: u16, word: u16) {

@@ -1,7 +1,9 @@
+#![warn(clippy::pedantic)]
+#![allow(clippy::cast_possible_truncation)]
+
 extern crate minifb;
 extern crate log;
 extern crate flexi_logger;
-
 mod rom;
 mod interconnect;
 mod opcode;
