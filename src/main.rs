@@ -1,5 +1,6 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::too_many_lines)]
 
 extern crate minifb;
 extern crate log;
@@ -57,6 +58,8 @@ fn main() {
     // For nestest only
     ctx.cpu.reg.pc = 0xc000;
 
+    let err = ctx.read(0x0002);
+    let err1 = ctx.read(0x0003);
     // Step one instruction at a time
     loop {
         let step: bool = false;
@@ -65,6 +68,9 @@ fn main() {
             ctx.decode();
         } else {
             ctx.decode();
+        }
+        if err | err1 != 0 {
+            eprintln!("{:02x}, {:02x}", err, err1);
         }
     }
 }
