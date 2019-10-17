@@ -1,7 +1,8 @@
-use interconnect::{MemoryMapper, Interconnect};
 use minifb::{Scale, WindowOptions, Window};
 use std::fmt::{Debug, Formatter, Result};
 use std::fmt::LowerHex;
+
+use crate::interconnect::{MemoryMapper, Interconnect};
 
 pub const WIDTH: u32 = 240;
 pub const HEIGHT: u32 = 256;

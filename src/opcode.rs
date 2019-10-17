@@ -1,5 +1,5 @@
 use std::fmt;
-use cpu::{StatusRegister};
+use crate::cpu::{StatusRegister};
 
 pub struct Instruction {
     pub opcode: u8,

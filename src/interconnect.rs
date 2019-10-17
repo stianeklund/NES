@@ -1,7 +1,8 @@
-use memory::Ram;
-use ppu::Ppu;
-use rom::Cartridge;
-use cpu::{ExecutionContext, Registers};
+use crate::memory::Ram;
+use crate::ppu::Ppu;
+use crate::rom::Cartridge;
+use crate::cpu::{ExecutionContext, Registers};
+
 
 pub trait MemoryMapper {
     fn read8(&mut self, addr: u16) -> u8 ;

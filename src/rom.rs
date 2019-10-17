@@ -1,4 +1,3 @@
-
 use std::ops::{Index, IndexMut};
 use std::ops::{Range, RangeTo};
 use std::path::Path;
@@ -6,8 +5,9 @@ use std::io::Read;
 use std::fs::File;
 use std::io::{Result, Error};
 use std::str;
-use memory::Ram;
-use interconnect::MemoryMapper;
+
+use crate::memory::Ram;
+use crate::interconnect::MemoryMapper;
 
 /* ******************************************************************************************** */
 // iNES HEADER INFORMATION

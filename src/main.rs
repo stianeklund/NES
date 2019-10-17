@@ -2,9 +2,9 @@
 #![allow(clippy::cast_possible_truncation)]
 #![allow(clippy::too_many_lines)]
 
-extern crate minifb;
-extern crate log;
-extern crate flexi_logger;
+use minifb;
+use flexi_logger;
+
 mod rom;
 mod interconnect;
 mod opcode;

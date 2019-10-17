@@ -1,4 +1,4 @@
-use interconnect::MemoryMapper;
+use crate::interconnect::MemoryMapper;
 
 // Audio won't be implemented anytime soon..
 // This is just to support rudimentary r/w APU & I/O data.
