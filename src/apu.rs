@@ -25,7 +25,7 @@ pub struct Registers {
 }
 
 impl MemoryMapper for Apu {
-    fn read(&mut self, addr: u16) -> u8 {
+    fn read8(&mut self, addr: u16) -> u8 {
         self.reg.cycles = self.reg.cycles.wrapping_add(1);
 
         match addr {
@@ -39,7 +39,7 @@ impl MemoryMapper for Apu {
             _ => unimplemented!("APU read to: {:04x} not implemented", addr)
         }
     }
-    fn write(&mut self, addr: u16, byte: u8) {
+    fn write8(&mut self, addr: u16, byte: u8) {
         self.reg.cycles = self.reg.cycles.wrapping_add(1);
 
         match addr {

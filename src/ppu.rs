@@ -145,7 +145,7 @@ impl Debug for Registers {
 // The PPU addresses a 16kB space, $0000-3FFF.
 // TODO Improve mapper to handle writes to registers that have write enable
 impl MemoryMapper for Ppu {
-        fn read(&mut self, addr: u16) -> u8 {
+        fn read8(&mut self, addr: u16) -> u8 {
             println!("PPU Read ${:04x}", addr);
             self.cycle = self.cycle.wrapping_add(1);
         match addr {
@@ -164,7 +164,7 @@ impl MemoryMapper for Ppu {
             _ => panic!("PPU Read: unrecognized address ${:04x}", addr)
         }
     }
-    fn write(&mut self, addr: u16, byte: u8) {
+    fn write8(&mut self, addr: u16, byte: u8) {
         match addr {
             0 ..= 0x1fff => self.chr[addr as usize] = byte,
             0x2000 => self.reg.ppu_ctrl_write(byte),

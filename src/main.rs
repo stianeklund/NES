@@ -58,8 +58,8 @@ fn main() {
     // For nestest only
     ctx.cpu.reg.pc = 0xc000;
 
-    let err = ctx.read(0x0002);
-    let err1 = ctx.read(0x0003);
+    let err = ctx.read8(0x0002);
+    let err1 = ctx.read8(0x0003);
     // Step one instruction at a time
     loop {
         let step: bool = false;

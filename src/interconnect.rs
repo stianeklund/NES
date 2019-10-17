@@ -4,14 +4,14 @@ use rom::Cartridge;
 use cpu::{ExecutionContext, Registers};
 
 pub trait MemoryMapper {
-    fn read(&mut self, addr: u16) -> u8 ;
+    fn read8(&mut self, addr: u16) -> u8 ;
     fn read16(&mut self, addr: u16) -> u16 {
-        u16::from(self.read(addr)) | u16::from(self.read(addr + 1)) << 8
+        u16::from(self.read8(addr)) | u16::from(self.read8(addr + 1)) << 8
     }
-    fn write(&mut self, addr: u16, byte: u8);
-    fn write_word(&mut self, addr: u16, word: u16) {
-        self.write(addr, word as u8);
-        self.write(addr + 1, (word >> 8) as u8);
+    fn write8(&mut self, addr: u16, byte: u8);
+    fn write16(&mut self, addr: u16, word: u16) {
+        self.write8(addr, word as u8);
+        self.write8(addr + 1, (word >> 8) as u8);
     }
 }
 pub struct AddressMatch {
