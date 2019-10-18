@@ -9,7 +9,6 @@ pub struct Ram {
     pub sram: Box<[u8; 0x8000]>
 }
 
-
 impl Index<u16> for Ram {
     type Output = u8;
     fn index(&self, index:u16) -> &u8 {

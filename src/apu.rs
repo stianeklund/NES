@@ -25,9 +25,7 @@ pub struct Registers {
 }
 
 impl MemoryMapper for Apu {
-    fn read8(&mut self, addr: u16) -> u8 {
-        self.reg.cycles = self.reg.cycles.wrapping_add(1);
-
+    fn read8(&self, addr: u16) -> u8 {
         match addr {
             0x4000 ..= 0x4003 => self.reg.pulse_1,
             0x4004 ..= 0x4007 => self.reg.pulse_2,
@@ -40,8 +38,6 @@ impl MemoryMapper for Apu {
         }
     }
     fn write8(&mut self, addr: u16, byte: u8) {
-        self.reg.cycles = self.reg.cycles.wrapping_add(1);
-
         match addr {
             0x4000 ..= 0x4003 => self.reg.pulse_1 = byte,
             0x4004 ..= 0x4007 => self.reg.pulse_2 = byte,

@@ -146,9 +146,10 @@ impl Debug for Registers {
 // The PPU addresses a 16kB space, $0000-3FFF.
 // TODO Improve mapper to handle writes to registers that have write enable
 impl MemoryMapper for Ppu {
-        fn read8(&mut self, addr: u16) -> u8 {
+        fn read8(&self, addr: u16) -> u8 {
             println!("PPU Read ${:04x}", addr);
-            self.cycle = self.cycle.wrapping_add(1);
+            // TODO figure out how to increment a cycle for each ppu read
+            // self.cycle = self.cycle.wrapping_add(1);
         match addr {
             0 ..= 0x1fff => self.chr[addr as usize],
             // TODO PPU Mirror? Is PPU size to `$3fff`?

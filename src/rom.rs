@@ -72,8 +72,7 @@ impl IndexMut<u16> for Cartridge {
 }
 
 impl MemoryMapper for Cartridge {
-    fn read8(&mut self, addr: u16) -> u8 {
-        // let addr = self.mask_addr(addr);
+    fn read8(&self, addr: u16) -> u8 {
         println!("Cart read: ${:04x}", addr);
         match addr {
             0 ..= 0x07ff => panic!("Trying to read RAM from Cartridge"),
@@ -83,7 +82,7 @@ impl MemoryMapper for Cartridge {
             _ => panic!("Unrecognized read address: {:04x}", addr)
         }
     }
-    fn read16(&mut self, addr: u16) -> u16 {
+    fn read16(&self, addr: u16) -> u16 {
         (self.read8(addr) as u16) | ((self.read8(addr + 1) as u16) << 8)
 
     }
