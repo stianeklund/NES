@@ -18,7 +18,7 @@ use std::io::{self, Read};
 use std::fs::File;
 use interconnect::{Interconnect, MemoryMapper};
 use cpu::ExecutionContext;
-use flexi_logger::{Logger, LogTarget, default_format};
+use flexi_logger::{Logger, LogTarget, opt_format};
 use log::{info, warn, debug};
 
 fn main() {
@@ -35,7 +35,7 @@ fn main() {
     Logger::with_str("nes")
         .log_to_file()
         .directory("log")
-        .format(default_format)
+        .format(opt_format)
         .start()
         .unwrap();
 
