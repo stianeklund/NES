@@ -18,7 +18,7 @@ use std::io::{self, Read};
 use std::fs::File;
 use interconnect::{Interconnect, MemoryMapper};
 use cpu::ExecutionContext;
-use flexi_logger::{Logger, LogTarget, opt_format};
+use flexi_logger::{Logger, LogTarget, opt_format, default_format};
 use log::{info, warn, debug};
 
 fn main() {
@@ -35,7 +35,7 @@ fn main() {
     Logger::with_str("nes")
         .log_to_file()
         .directory("log")
-        .format(opt_format)
+        .format(default_format)
         .start()
         .unwrap();
 
@@ -46,7 +46,7 @@ fn main() {
 
     let mut ctx = ExecutionContext::new();
     ctx.reset();
-    ctx.cart.load_rom(&mut f);
+    ctx.cart.load_rom(&f);
 
     // For debugging purposes
     // Get word at memory location 0xfffc and set PC value.
@@ -60,15 +60,13 @@ fn main() {
 
     let err = ctx.read8(0x0002);
     let err1 = ctx.read8(0x0003);
-    // Step one instruction at a time
+
     loop {
         let step: bool = false;
         if step {
             io::stdin().read_line(&mut String::new()).unwrap();
-            ctx.decode();
-        } else {
-            ctx.decode();
         }
+        ctx.decode();
         if err | err1 != 0 {
             eprintln!("{:02x}, {:02x}", err, err1);
         }
