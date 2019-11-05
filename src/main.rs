@@ -19,7 +19,7 @@ use std::fs::File;
 use interconnect::{Interconnect, MemoryMapper};
 use cpu::ExecutionContext;
 use flexi_logger::{Logger, LogTarget, opt_format, default_format};
-use log::{info, warn, debug};
+use log::{info, error, warn, debug};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -29,7 +29,7 @@ fn main() {
     }
     let file = &args[1];
     let path = Path::new(file);
-    let mut f = File::open(&path).expect("Unable to find ROM");
+    let f = File::open(&path).expect("Unable to find ROM");
 
     // TODO Use logging for general purpose not debugging
     Logger::with_str("nes")
@@ -58,8 +58,7 @@ fn main() {
     // For nestest only
     ctx.cpu.reg.pc = 0xc000;
 
-    let err = ctx.read8(0x0002);
-    let err1 = ctx.read8(0x0003);
+    let test_output = ctx.read8(0x6000);
 
     loop {
         let step: bool = false;
@@ -67,9 +66,8 @@ fn main() {
             io::stdin().read_line(&mut String::new()).unwrap();
         }
         ctx.decode();
-        if err | err1 != 0 {
-            eprintln!("{:02x}, {:02x}", err, err1);
+        if test_output != 0 {
+            eprintln!("{:x}", test_output);
         }
     }
 }
-
