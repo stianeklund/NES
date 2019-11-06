@@ -200,7 +200,7 @@ impl ExecutionContext {
                 self.adv_cycles(mode.cycle_length.into());
             },
             _ => {
-                self.adv_pc(mode.byte_length.into());
+                self.adv_pc((mode.byte_length).into());
                 self.adv_cycles(mode.cycle_length.into());
             }
         }
@@ -325,9 +325,7 @@ impl ExecutionContext {
             cycle_length: 6
         }
     }
-
     pub fn decode(&mut self) {
-        // let opcode = self.fetch_byte();
         let opcode = self.read8(self.cpu.reg.pc);
         self.cpu.opcode = opcode as u8;
         self.cpu.p = self.get_status_flags();
@@ -722,6 +720,8 @@ impl ExecutionContext {
         value
     }
     fn ldx(&mut self, value: AddressMode <u16>) -> AddressMode<u16> {
+        let result = self.read8(value.data);
+        debug!("result:{:x}", result);
         self.cpu.reg.x = value.data as u8;
         self.cpu.flags.zero = value.data == 0;
         self.cpu.flags.negative = (value.data & 0x80) != 0;
@@ -821,9 +821,8 @@ impl ExecutionContext {
         value
     }
     fn rts(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> {
-        let pc = self.pop16() + 1;
-        // debug!("PC{:04x}, PC + 1:{:04x}", pc, pc + 1);
-        self.cpu.reg.pc = pc;
+        let pc = self.pop16();
+        self.cpu.reg.pc = pc + 1;
         mode
     }
     // Return from interrupt
@@ -901,7 +900,10 @@ impl ExecutionContext {
         mode
     }
     // Transfer X to Stack Pointer
-    fn txs(&mut self, mode: AddressMode<u16>) -> AddressMode<u16>  { self.cpu.reg.sp = self.cpu.reg.x; mode }
+    fn txs(&mut self, mode: AddressMode<u16>) -> AddressMode<u16>  {
+        self.cpu.reg.sp = self.cpu.reg.x;
+        mode
+    }
     // Transfer Stack Pointer to X
     fn tsx(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> {
         self.cpu.reg.x = self.cpu.reg.sp;
@@ -984,19 +986,19 @@ impl ExecutionContext {
         // let byte = self.read_word(value) as u8;
         self.write8(value.address, value.data as u8);
         self.cpu.flags.carry = value.data & 0x80 != 0;
-        self.cpu.flags.zero = value.data & 0xff == 0;
+        self.cpu.flags.zero = value.data.trailing_zeros() >= 8;
         value
     }
     // Increment X (implied mode)
     fn inx(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> {
         self.cpu.reg.x = self.cpu.reg.x.wrapping_add(1);
-        self.cpu.flags.zero = (self.cpu.reg.x & 0xff) == 0;
+        self.cpu.flags.zero = self.cpu.reg.x.trailing_zeros() >= 8;
         self.cpu.flags.negative = (self.cpu.reg.x & 0x80) != 0;
         mode
     }
     fn iny(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> {
         self.cpu.reg.y = self.cpu.reg.y.wrapping_add(1);
-        self.cpu.flags.zero = (self.cpu.reg.y & 0xff) == 0;
+        self.cpu.flags.zero = self.cpu.reg.y.trailing_zeros() >= 8;
         self.cpu.flags.negative = (self.cpu.reg.y & 0x80) != 0;
         mode
     }
@@ -1004,8 +1006,8 @@ impl ExecutionContext {
     fn jsr(&mut self, mode: AddressMode<u16>) -> AddressMode<u16>  {
         // Push to stack
         let pc = self.cpu.reg.pc;
-        self.push_word(pc - 1);
-        self.cpu.reg.pc = mode.address;
+        self.push_word(pc + 2); // Because we need to increment PC by one to fetch
+        self.cpu.reg.pc = mode.address as u16;
         mode
     }
     fn jmp(&mut self, mode: AddressMode <u16>) -> AddressMode<u16> {
@@ -1017,10 +1019,10 @@ impl ExecutionContext {
 
     // ISC (Increase memory by one) UNOFFICIAL OPCODE
     fn isc(&mut self, value: AddressMode <u16>) -> AddressMode<u16> {
-        let addr = self.read16(value.data).wrapping_add(self.cpu.reg.x as u16);
-        if (value.data - self.cpu.reg.x as u16) & 0xff00 != value.data & 0xff00 { self.adv_cycles(1); }
-        let result = (self.cpu.reg.a as u16).wrapping_sub(addr as u16).wrapping_sub(self.cpu.flags.carry as u16);
-        self.cpu.flags.zero = (result & 0xff) == 0;
+        let addr = self.read16(value.data).wrapping_add(u16::from(self.cpu.reg.x));
+        if (value.data - u16::from(self.cpu.reg.x)) & 0xff00 != value.data & 0xff00 { self.adv_cycles(1); }
+        let result = u16::from(self.cpu.reg.a).wrapping_sub(addr as u16).wrapping_sub(self.cpu.flags.carry as u16);
+        self.cpu.flags.zero = result.trailing_zeros() >= 8;
         self.cpu.flags.negative = (result & 0x80) != 0;
         self.cpu.reg.a = result as u8;
         value
