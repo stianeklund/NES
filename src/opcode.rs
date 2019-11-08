@@ -50,7 +50,7 @@ impl Instruction {
     pub fn short_mnemonic(opcode: u8) -> &'static str {
         match opcode {
             0x00 => "BRK",
-            0x01 => "BPL",
+            0x01 => "ORA",
             0x02 => "KIL",
             0x03 => "SLO",
             0x04 => "RTI",

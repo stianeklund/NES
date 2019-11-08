@@ -194,7 +194,7 @@ impl ExecutionContext {
     }
     fn adv(&mut self, mode: AddressMode<u16>) {
         match self.cpu.opcode {
-            // Don't increment the PC for JMP instructions
+            // Don't increment the PC for JMP & JSR instructions
             0x4c | 0x6c | 0x20 => { self.adv_cycles(mode.cycle_length.into()) },
             // RTS / RTI
             0x40 | 0x60 => {
@@ -320,13 +320,15 @@ impl ExecutionContext {
         }
     }
     fn indirect_y(&self) -> AddressMode <u8> {
-        let pointer = self.read8(self.cpu.reg.pc + 1).wrapping_add(self.cpu.reg.y);
+        let pointer = self.read8(self.cpu.reg.pc + 1);
         let indirect =  u16::from(self.read8(pointer.into())) | u16::from(self.read8(pointer.wrapping_add(1).into())).wrapping_shl(8);
         AddressMode {
-            address: indirect,
+            address: indirect.wrapping_add(self.cpu.reg.y.into()),
             data: self.read8(indirect),
             byte_length: 2,
             cycle_length: 6
+            // 5 or 6 cycles depending on low address byte + Y overflow
+            // Stores and RMW instructions always take 6 and 8 cycles.
         }
     }
     pub fn decode(&mut self) {
@@ -390,7 +392,7 @@ impl ExecutionContext {
             0xbd => self.lda(self.abs_x()),
             0xbe => self.ldx(self.abs_y()),
             0xc0 => self.cpy(self.imm().into()),
-            0xc1 => self.cmp(AddressMode::from(self.indirect_y())),
+            0xc1 => self.cmp(AddressMode::from(self.indirect_x())),
             0xc5 => self.cmp(AddressMode::from(self.zp())),
             0x40 => self.rti(self.implied(6)),
             0x41 => self.eor(AddressMode::from(self.indirect_y())),
@@ -413,6 +415,7 @@ impl ExecutionContext {
             0x2e => self.rol(self.abs()),
             0x2d => self.and(self.abs()),
             0x30 => self.bmi(AddressMode::from(self.relative())),
+            0x31 => self.and(AddressMode::from(self.indirect_y())),
             0x35 => self.and(self.zp_x()),
             0x36 => self.rol(self.zp_x()),
             0x38 => self.sec(self.implied(2)),
@@ -436,6 +439,7 @@ impl ExecutionContext {
             0x69 => self.adc(self.imm().into()),
             0x6e => self.ror(self.abs()),
             0x70 => self.bvs(self.relative()),
+            0x71 => self.adc(AddressMode::from(self.indirect_y())),
             0x78 => self.sei(self.implied(2)),
             0x79 => self.adc(AddressMode::from(self.indirect_y())),
             0x7e => self.ror(self.abs_x()),
@@ -465,6 +469,7 @@ impl ExecutionContext {
             0xcd => self.cmp(self.abs()),
             0xcc => self.cpy(self.abs()),
             0xd0 => self.bne(AddressMode::from(self.relative())),
+            0xd1 => self.cmp(AddressMode::from(self.indirect_y())),
             // 0xd2 => self.hlt(mode),
             // 0xd3 | 0xdf => self.dcp(),
             0xd6 => self.dec(self.zp_x()),
@@ -513,7 +518,7 @@ impl ExecutionContext {
     // ASL (Accumulator) helper function for ASL Accumulator
     fn asla(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> {
         let a: u8 =  self.cpu.reg.a;
-        let result = a << 1;
+        let result = a.wrapping_shl(1);
         self.cpu.reg.a = result;
         self.cpu.flags.negative = (result & 0x80) != 0;
         self.cpu.flags.zero = result == 0;
@@ -527,9 +532,8 @@ impl ExecutionContext {
         // ASL shifts all bits left one position. 0 is shifted into bit 0
         // and the original bit 7 is shifted into the carry slot
         // Affected flags: S Z C
-        // let operand: u8 =  self.read(addr);
-        let result = (value.data as u8) << 1;
-        self.write8(value.data as u16, result);
+        let result = (value.data as u8).wrapping_shl(1);
+        self.write8(value.address, result);
         self.cpu.flags.negative = (result & 0x80) != 0;
         self.cpu.flags.zero = result == 0;
         self.cpu.flags.carry = (value.data & 0x80) != 0;
