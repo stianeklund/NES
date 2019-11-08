@@ -69,5 +69,6 @@ fn main() {
         if test_output != 0 {
             eprintln!("{:x}", test_output);
         }
+        // eprintln!("{:x} {:x}", ctx.read8(0x02), ctx.read8(0x03));
     }
 }

@@ -48,8 +48,8 @@ impl MemoryMapper for ExecutionContext {
         if self.debug {
             //Print known address names
             println!("{}", AddressMatch::resolve_addr(byte, addr));
+            debug!("Writing {:02x} to ${:04x}", byte, addr);
         }
-        // debug!("Writing {:02x} to ${:04x}", byte, addr);
     }
 }
 #[derive(Debug, Clone, Copy)]
@@ -235,10 +235,11 @@ impl ExecutionContext {
         }
     }
     fn abs(&self) -> AddressMode<u16> {
-        let address = self.read16(self.cpu.reg.pc + 1);
+        let pc = self.cpu.reg.pc + 1;
+        let address = self.read16(pc);
         AddressMode{
             address,
-            data: u16::from(self.read8(address)),
+            data: u16::from(self.read16(address) as u8),
             byte_length: 3,
             cycle_length: 4
         }
@@ -270,11 +271,11 @@ impl ExecutionContext {
             cycle_length: 2
         }
     }
-    fn zp(&self) -> AddressMode <u16> {
+    fn zp(&self) -> AddressMode <u8> {
         let address = u16::from(self.read8(self.cpu.reg.pc + 1));
         AddressMode {
             address,
-            data: u16::from(self.read8(address)),
+            data: self.read8(address),
             byte_length: 2,
             cycle_length: 3,
         }
@@ -343,8 +344,8 @@ impl ExecutionContext {
             0x01 => self.ora(self.indirect_x()),
             // 0x03 => self.slo(&self.indirect_x()),
             0x04 | 0x0c | 0x1c | 0x5a | 0x54 | 0x72 | 0x73 | 0xea => self.nop(), // 0x04 ZP?
-            0x05 => self.ora(self.zp()),
-            0x06 => self.asl(self.zp()),
+            0x05 => self.ora(AddressMode::from(self.zp())),
+            0x06 => self.asl(AddressMode::from(self.zp())),
             // 0x07 => self.slo(&self.zp().into()),
             0x08 => self.php(self.implied(3)),
             0x09 => self.ora(self.imm().into()),
@@ -365,9 +366,9 @@ impl ExecutionContext {
             0xa0 => self.ldy(self.imm().into()),
             0xa1 => self.lda(self.indirect_x()),
             0xa2 => self.ldx(self.imm().into()),
-            0xa4 => self.ldy(self.zp()),
-            0xa5 => self.lda(self.zp()),
-            0xa6 => self.ldx(self.zp()),
+            0xa4 => self.ldy(AddressMode::from(self.zp())),
+            0xa5 => self.lda(AddressMode::from(self.zp())),
+            0xa6 => self.ldx(AddressMode::from(self.zp())),
             0xa8 => self.tay(self.implied(2)),
             0xa9 => self.lda(self.imm().into()),
             0xaa => self.tax(self.implied(2)),
@@ -387,21 +388,21 @@ impl ExecutionContext {
             0xbe => self.ldx(self.abs_y()),
             0xc0 => self.cpy(self.imm().into()),
             0xc1 => self.cmp(self.indirect_y()),
-            0xc5 => self.cmp(self.zp()),
+            0xc5 => self.cmp(AddressMode::from(self.zp())),
             0x40 => self.rti(self.implied(6)),
             0x41 => self.eor(self.indirect_y()),
             0x4a => self.lsra(self.implied(2)),
             0x4e => self.lsr(self.abs()),
             0x4d => self.eor(self.abs()),
-            0x45 => self.eor(self.zp()),
-            0x46 => self.lsr(self.zp()),
+            0x45 => self.eor(AddressMode::from(self.zp())),
+            0x46 => self.lsr(AddressMode::from(self.zp())),
             0x48 => self.pha(self.implied(3)),
             0x49 => self.eor(self.imm().into()),
             0x20 => self.jsr(self.abs()),
             0x21 => self.and(self.indirect_y()),
-            0x24 => self.bit(self.zp()),
-            0x25 => self.and(self.zp()),
-            0x26 => self.rol(self.zp()),
+            0x24 => self.bit(AddressMode::from(self.zp())),
+            0x25 => self.and(AddressMode::from(self.zp())),
+            0x26 => self.rol(AddressMode::from(self.zp())),
             0x28 => self.plp(self.implied(4)),
             0x29 => self.and(self.imm().into()),
             0x2a => self.rola(self.implied(2)),
@@ -423,8 +424,8 @@ impl ExecutionContext {
             0x61 => self.adc(self.indirect_x()),
             // TODO Dummy read for NOPs?
             // 0x64 => self.dop(),
-            0x65 => self.adc(self.zp()),
-            0x66 => self.ror(self.zp()),
+            0x65 => self.adc(AddressMode::from(self.zp())),
+            0x66 => self.ror(AddressMode::from(self.zp())),
             0x68 => self.pla(self.implied(4)),
             0x6a => self.rora(self.implied(2)),
             0x6c => self.jmp(self.indirect()),
@@ -436,9 +437,9 @@ impl ExecutionContext {
             0x79 => self.adc(self.indirect_y()),
             0x7e => self.ror(self.abs_x()),
             0x81 => self.sta(self.indirect_x()),
-            0x84 => self.sty(self.zp()),
-            0x85 => self.sta(self.zp()),
-            0x86 => self.stx(self.zp()),
+            0x84 => self.sty(AddressMode::from(self.zp())),
+            0x85 => self.sta(AddressMode::from(self.zp())),
+            0x86 => self.stx(AddressMode::from(self.zp())),
             0x88 => self.dey(self.implied(2)),
             0x8a => self.txa(self.implied(2)),
             0x8c => self.sty(self.abs()),
@@ -453,8 +454,8 @@ impl ExecutionContext {
             0x9a => self.txs(self.implied(2)),
             0x9d => self.sta(self.abs_x()),
             // 0xc3 => self.dcp(), // ILLEGAL
-            0xc4 => self.cpy(self.zp()),
-            0xc6 => self.dec(self.zp()),
+            0xc4 => self.cpy(AddressMode::from(self.zp())),
+            0xc6 => self.dec(AddressMode::from(self.zp())),
             0xc9 => self.cmp(self.imm().into()),
             0xca => self.dex(self.implied(2)),
             0xce => self.dec(self.abs()),
@@ -469,19 +470,20 @@ impl ExecutionContext {
             0xde => self.dec(self.abs_x()),
             0xe0 => self.cpx(self.imm().into()),
             0xe1 => self.sbc(self.indirect_x()),
-            0xe4 => self.cpx(self.zp()),
-            0xe5 => self.sbc(self.zp()),
-            0xe6 => self.inc(self.zp()),
+            0xe4 => self.cpx(AddressMode::from(self.zp())),
+            0xe5 => self.sbc(AddressMode::from(self.zp())),
+            0xe6 => self.inc(AddressMode::from(self.zp())),
             0xe8 => self.inx(self.implied(2)),
             0xe9 => self.sbc(self.imm().into()),
             0xec => self.cpx(self.abs()),
+            0xee => self.inc(self.abs()),
             0xed => self.sbc(self.abs()),
             0xc8 => self.iny(self.implied(2)),
             0xf0 => self.beq(AddressMode::from(self.relative())),
             0xf1 => self.sbc(self.indirect_y()),
             0xf5 => self.sbc(self.zp_x()),
             0xf6 => self.inc(self.zp_x()),
-            0xf7 => self.isc(self.zp()),
+            0xf7 => self.isc(AddressMode::from(self.zp())),
             0xf8 => self.sed(self.implied(2)),
             0xfe => self.inc(self.abs_x()),
             0xfd => self.sbc(self.abs_x()),
@@ -623,7 +625,7 @@ impl ExecutionContext {
     }
     // Test Bits N Z V
     fn bit(&mut self, value: AddressMode <u16>) -> AddressMode<u16> {
-        let v = self.read8(value.data);
+        let v = value.data;
         let a = self.cpu.reg.a as u8;
         self.cpu.flags.zero = (v as u8 & a )== 0;
         self.cpu.flags.negative = (v & 0x80) != 0;
@@ -720,8 +722,7 @@ impl ExecutionContext {
         value
     }
     fn ldx(&mut self, value: AddressMode <u16>) -> AddressMode<u16> {
-        let result = self.read8(value.data);
-        debug!("result:{:x}", result);
+        // debug!("ldx mode:{:x}", value);
         self.cpu.reg.x = value.data as u8;
         self.cpu.flags.zero = value.data == 0;
         self.cpu.flags.negative = (value.data & 0x80) != 0;
@@ -827,11 +828,10 @@ impl ExecutionContext {
     }
     // Return from interrupt
     fn rti(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> {
-        // TODO value is not used
         // Pull processor flags from stack
         let flags = self.pop_byte();
         self.set_status_flags(flags);
-        self.cpu.reg.pc = self.pop16();
+        self.cpu.reg.pc = self.pop16() + 1;
         mode
     }
     fn sed(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> { self.cpu.flags.decimal = true; mode }
@@ -868,9 +868,9 @@ impl ExecutionContext {
         self.cpu.flags.zero = result == 0;
         value
     }
-    fn sta(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> { self.write8(mode.data, self.cpu.reg.a); mode }
-    fn sty(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> { self.write8(mode.data, self.cpu.reg.y); mode }
-    fn stx(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> { self.write8(mode.data, self.cpu.reg.x); mode }
+    fn sta(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> { self.write8(mode.address, self.cpu.reg.a); mode }
+    fn sty(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> { self.write8(mode.address, self.cpu.reg.y); mode }
+    fn stx(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> { self.write8(mode.address, self.cpu.reg.x); mode }
     // Transfer Accumulator to X
     fn tax(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> {
         self.cpu.reg.x = self.cpu.reg.a;
@@ -906,9 +906,10 @@ impl ExecutionContext {
     }
     // Transfer Stack Pointer to X
     fn tsx(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> {
-        self.cpu.reg.x = self.cpu.reg.sp;
-        self.cpu.flags.zero = self.cpu.reg.x == 0;
-        self.cpu.flags.negative = (self.cpu.reg.x & 0x80) != 0;
+        let sp = self.cpu.reg.sp;
+        self.cpu.reg.x = sp;
+        self.cpu.flags.zero = sp == 0;
+        self.cpu.flags.negative = (sp & 0x80) != 0;
         mode
     }
     fn push_word(&mut self, value: u16) {
