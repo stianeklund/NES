@@ -338,7 +338,10 @@ impl ExecutionContext {
             0x00 | 0x02 => ::std::process::exit(0x100), // self.brk(),
             0x01 => self.ora(AddressMode::from(self.indirect_x())),
             // 0x03 => self.slo(&self.indirect_x()),
-            0x04 | 0x0c | 0x1c | 0x5a | 0x54 | 0x72 | 0x73 | 0xea => self.nop(), // 0x04 ZP?
+            0x0c => self.top(self.abs()),
+            0x1a | 0x3a | 0x5a | 0x7a | 0xda | 0xfa | 0x72 | 0x73 | 0xea => self.nop(),
+            0x1c | 0x3c | 0x5c | 0x7c | 0xdc | 0xfc => self.top(self.abs_x()),
+            0x04 => self.dop(AddressMode::from(self.zp())),
             0x05 => self.ora(AddressMode::from(self.zp())),
             0x06 => self.asl(AddressMode::from(self.zp())),
             // 0x07 => self.slo(&self.zp().into()),
@@ -348,6 +351,7 @@ impl ExecutionContext {
             0x10 => self.bpl(AddressMode::from(self.relative())),
             0x11 => self.ora(AddressMode::from(self.indirect_y())),
             0x13 => self.slo(AddressMode::from(self.indirect_y())),
+            0x14 => self.dop(self.zp_x()),
             0x15 => self.ora(self.zp_x()),
             0x16 => self.asl(self.zp_x()),
             // 0x17 => self.slo(&self.zp().into()),
@@ -387,6 +391,7 @@ impl ExecutionContext {
             0xc5 => self.cmp(AddressMode::from(self.zp())),
             0x40 => self.rti(self.implied(6)),
             0x41 => self.eor(AddressMode::from(self.indirect_x())),
+            0x44 => self.dop(AddressMode::from(self.zp())),
             0x4a => self.lsra(self.implied(2)),
             0x4e => self.lsr(self.abs()),
             0x4d => self.eor(self.abs()),
@@ -408,6 +413,7 @@ impl ExecutionContext {
             0x3d => self.and(self.abs_x()),
             0x30 => self.bmi(AddressMode::from(self.relative())),
             0x31 => self.and(AddressMode::from(self.indirect_y())),
+            0x34 => self.dop(self.zp_x()),
             0x35 => self.and(self.zp_x()),
             0x36 => self.rol(self.zp_x()),
             0x38 => self.sec(self.implied(2)),
@@ -416,6 +422,7 @@ impl ExecutionContext {
             0x4c => self.jmp(self.abs()),
             0x50 => self.bvc(AddressMode::from(self.relative())),
             0x51 => self.eor(AddressMode::from(self.indirect_y())),
+            0x54 => self.dop(self.zp_x()),
             0x55 => self.eor(self.zp_x()),
             0x56 => self.lsr(self.zp_x()),
             0x59 => self.eor(self.abs_y()),
@@ -424,7 +431,7 @@ impl ExecutionContext {
             0x60 => self.rts(self.implied(6)),
             0x61 => self.adc(AddressMode::from(self.indirect_x())),
             // TODO Dummy read for NOPs?
-            // 0x64 => self.dop(),
+            0x64 => self.dop(AddressMode::from(self.zp())),
             0x65 => self.adc(AddressMode::from(self.zp())),
             0x66 => self.ror(AddressMode::from(self.zp())),
             0x68 => self.pla(self.implied(4)),
@@ -435,17 +442,21 @@ impl ExecutionContext {
             0x6e => self.ror(self.abs()),
             0x70 => self.bvs(self.relative()),
             0x71 => self.adc(AddressMode::from(self.indirect_y())),
+            0x74 => self.dop(self.zp_x()),
             0x75 => self.adc(self.zp_x()),
             0x76 => self.ror(self.zp_x()),
             0x78 => self.sei(self.implied(2)),
             0x79 => self.adc(self.abs_y()),
             0x7d => self.adc(self.abs_x()),
             0x7e => self.ror(self.abs_x()),
+            0x80 => self.dop(AddressMode::from(self.imm())),
             0x81 => self.sta(AddressMode::from(self.indirect_x())),
+            0x82 => self.dop(AddressMode::from(self.imm())),
             0x84 => self.sty(AddressMode::from(self.zp())),
             0x85 => self.sta(AddressMode::from(self.zp())),
             0x86 => self.stx(AddressMode::from(self.zp())),
             0x88 => self.dey(self.implied(2)),
+            0x89 => self.dop(AddressMode::from(self.imm())),
             0x8a => self.txa(self.implied(2)),
             0x8c => self.sty(self.abs()),
             0x8d => self.sta(self.abs()),
@@ -459,6 +470,7 @@ impl ExecutionContext {
             0x99 => self.sta(self.abs_y()),
             0x9a => self.txs(self.implied(2)),
             0x9d => self.sta(self.abs_x()),
+            0xc2 => self.dop(AddressMode::from(self.imm())),
             // 0xc3 => self.dcp(), // ILLEGAL
             0xc4 => self.cpy(AddressMode::from(self.zp())),
             0xc6 => self.dec(AddressMode::from(self.zp())),
@@ -467,6 +479,7 @@ impl ExecutionContext {
             0xce => self.dec(self.abs()),
             0xcd => self.cmp(self.abs()),
             0xcc => self.cpy(self.abs()),
+            0xd4 => self.dop(self.zp_x()),
             0xdd => self.cmp(self.abs_x()),
             0xd0 => self.bne(AddressMode::from(self.relative())),
             0xd1 => self.cmp(AddressMode::from(self.indirect_y())),
@@ -479,6 +492,7 @@ impl ExecutionContext {
             0xde => self.dec(self.abs_x()),
             0xe0 => self.cpx(self.imm().into()),
             0xe1 => self.sbc(AddressMode::from(self.indirect_x())),
+            0xe2 => self.dop(AddressMode::from(self.imm())),
             0xe4 => self.cpx(AddressMode::from(self.zp())),
             0xe5 => self.sbc(AddressMode::from(self.zp())),
             0xe6 => self.inc(AddressMode::from(self.zp())),
@@ -490,6 +504,7 @@ impl ExecutionContext {
             0xc8 => self.iny(self.implied(2)),
             0xf0 => self.beq(AddressMode::from(self.relative())),
             0xf1 => self.sbc(AddressMode::from(self.indirect_y())),
+            0xf4 => self.dop(self.zp_x()),
             0xf5 => self.sbc(self.zp_x()),
             0xf6 => self.inc(self.zp_x()),
             0xf7 => self.isc(AddressMode::from(self.zp())),
@@ -699,7 +714,18 @@ impl ExecutionContext {
     // Decrement & compare
     // fn dcp(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> { println!("DCP (illegal opcode)"); mode}
     // Double NOP
-    // fn dop(&mut self) { self.adv_cycles(1); }
+    fn dop(&self, mode: AddressMode<u16>) -> AddressMode<u16> {
+        self.read8(self.cpu.reg.pc + 1);
+        self.read8(self.cpu.reg.pc + 1);
+        mode
+    }
+    // Triple NOP
+    fn top(&self, mode: AddressMode<u16>) -> AddressMode<u16> {
+        self.read8(self.cpu.reg.pc + 1);
+        self.read8(self.cpu.reg.pc + 1);
+        self.read8(self.cpu.reg.pc + 1);
+        mode
+    }
     // Exclusive OR (XOR)
     fn eor(&mut self, value: AddressMode <u16>) -> AddressMode<u16> {
         // Exclusive OR is performed on the accumulator's contents with the contents of a byte
@@ -978,7 +1004,7 @@ impl ExecutionContext {
     fn pla(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> {
         // Pulls an 8-bit value from the stack and into the accumulator.
         // Flags affected zero & negative
-        let value = self.pop_byte();
+        let value = self.pop_byte() as u8;
         self.cpu.flags.zero = (value & 0xff) == 0;
         self.cpu.flags.negative = (value & 0x80) != 0;
         self.cpu.reg.a = value & 0xff;

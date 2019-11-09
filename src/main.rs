@@ -50,7 +50,6 @@ fn main() {
 
     // For debugging purposes
     // Get word at memory location 0xfffc and set PC value.
-    // Note reads add to the cycle counter..
     // println!("Reset Vector: {:04x}", ctx.read16(0xfffc));
     // println!("NMI Vector:   {:04x}", ctx.read16(0xfffa));
     // println!("IRQ Vector:   {:04x}", ctx.read16(0xfffe));
@@ -59,6 +58,9 @@ fn main() {
     ctx.cpu.reg.pc = 0xc000;
 
     let test_output = ctx.read8(0x6000);
+    let err1 = ctx.read8(0x02);
+    let err2 = ctx.read8(0x03);
+    // eprintln!("{:x} {:x}", ctx.read8(0x02), ctx.read8(0x03));
 
     loop {
         let step: bool = false;
@@ -69,6 +71,11 @@ fn main() {
         if test_output != 0 {
             eprintln!("{:x}", test_output);
         }
-        // eprintln!("{:x} {:x}", ctx.read8(0x02), ctx.read8(0x03));
+        if err1 != 0 {
+            eprintln!("{:x}", err1);
+        }
+        if err2 != 0 {
+            eprintln!("{:x}", err2);
+        }
     }
 }

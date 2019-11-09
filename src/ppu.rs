@@ -158,6 +158,7 @@ impl MemoryMapper for Ppu {
             0x2001 => self.reg.ppu_mask,
             // https://wiki.nesdev.com/w/index.php/PPU_registers#PPUSTATUS
             0x2002 => self.reg.ppu_status,
+            0x2003 => self.reg.oam_addr,
             // R/W to this addr should increment VRAM by amount specified at $2000:2
             0x2007 => self.reg.ppu_data,
             0x2008 ..= 0x2fff => self.vram[addr as usize],
