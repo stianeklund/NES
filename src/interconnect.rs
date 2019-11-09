@@ -7,7 +7,7 @@ use crate::cpu::{ExecutionContext, Registers};
 pub trait MemoryMapper {
     fn read8(&self, addr: u16) -> u8 ;
     fn read16(&self, addr: u16) -> u16 {
-        u16::from(self.read8(addr)) | u16::from(self.read8(addr + 1)) << 8
+        u16::from_le_bytes([self.read8(addr), self.read8(addr + 1)])
     }
     fn write8(&mut self, addr: u16, byte: u8);
     fn write16(&mut self, addr: u16, word: u16) {

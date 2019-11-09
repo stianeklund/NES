@@ -95,7 +95,7 @@ impl<T>AddressMode<T> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct StatusRegister {
     negative: bool,
     overflow: bool,
@@ -105,9 +105,10 @@ pub struct StatusRegister {
     interrupt: bool,
     zero: bool,
     carry: bool,
+
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Registers {
     pub pc: u16,
     pub prev_pc: u16,
@@ -117,19 +118,7 @@ pub struct Registers {
     pub y: u8,
 }
 
-impl Registers {
-    pub fn default() -> Self {
-        Self {
-            pc: 0,
-            prev_pc: 0,
-            sp: 0,
-            a: 0,
-            x: 0,
-            y: 0,
-        }
-    }
-}
-
+#[derive(Debug)]
 pub struct Cpu {
     pub reg: Registers,
     flags: StatusRegister,
@@ -137,18 +126,10 @@ pub struct Cpu {
     pub opcode: u8,
     p: u8,
 }
-
 impl Cpu {
     pub fn default() -> Self {
         Self {
-            reg: Registers {
-                pc: 0,
-                prev_pc: 0,
-                sp: 0,
-                a: 0,
-                x: 0,
-                y: 0,
-            },
+            reg: Default::default(),
             flags: StatusRegister {
                 negative: false,
                 overflow: false,
@@ -157,14 +138,16 @@ impl Cpu {
                 decimal: false,
                 interrupt: false,
                 zero: false,
-                carry: false,
+                carry: false
             },
             cycles: 0,
             opcode: 0,
-            p: 0,
+            p: 0
         }
     }
 }
+
+
 pub struct ExecutionContext {
     pub cpu: Cpu,
     pub cart: Cartridge,
@@ -311,7 +294,7 @@ impl ExecutionContext {
     }
     fn indirect_x(&self) -> AddressMode <u8> {
         let pointer = self.read8(self.cpu.reg.pc + 1).wrapping_add(self.cpu.reg.x);
-        let indirect =  u16::from(self.read8(pointer.into())) | u16::from(self.read8(pointer.wrapping_add(1).into())).wrapping_shl(8);
+        let indirect =  u16::from(self.read8(pointer.into())) | u16::from(self.read8(pointer.wrapping_add(1).into())) << 8;
         AddressMode {
             address: indirect,
             data: self.read8(indirect),
@@ -321,7 +304,8 @@ impl ExecutionContext {
     }
     fn indirect_y(&self) -> AddressMode <u8> {
         let pointer = self.read8(self.cpu.reg.pc + 1);
-        let indirect =  u16::from(self.read8(pointer.into())) | u16::from(self.read8(pointer.wrapping_add(1).into())).wrapping_shl(8);
+        let indirect = u16::from_le_bytes([self.read8(pointer as u16), self.read8(pointer as u16 + 1)]);
+        // let indirect =  u16::from(self.read8(pointer.into())) | u16::from(self.read8((pointer.wrapping_add(1) as u8) as u16)) << 8;
         AddressMode {
             address: indirect.wrapping_add(self.cpu.reg.y.into()),
             data: self.read8(indirect),
@@ -463,7 +447,7 @@ impl ExecutionContext {
             // 0xc3 => self.dcp(), // ILLEGAL
             0xc4 => self.cpy(AddressMode::from(self.zp())),
             0xc6 => self.dec(AddressMode::from(self.zp())),
-            0xc9 => self.cmp(self.imm().into()),
+            0xc9 => self.cmp(AddressMode::from(self.imm())),
             0xca => self.dex(self.implied(2)),
             0xce => self.dec(self.abs()),
             0xcd => self.cmp(self.abs()),
@@ -518,7 +502,8 @@ impl ExecutionContext {
     // ASL (Accumulator) helper function for ASL Accumulator
     fn asla(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> {
         let a: u8 =  self.cpu.reg.a;
-        let result = a.wrapping_shl(1);
+        // let result = a.wrapping_shl(1);
+        let result = a << 1;
         self.cpu.reg.a = result;
         self.cpu.flags.negative = (result & 0x80) != 0;
         self.cpu.flags.zero = result == 0;
@@ -532,7 +517,8 @@ impl ExecutionContext {
         // ASL shifts all bits left one position. 0 is shifted into bit 0
         // and the original bit 7 is shifted into the carry slot
         // Affected flags: S Z C
-        let result = (value.data as u8).wrapping_shl(1);
+        // let result = (value.data as u8).wrapping_shl(1);
+        let result = (value.data as u8) << 1;
         self.write8(value.address, result);
         self.cpu.flags.negative = (result & 0x80) != 0;
         self.cpu.flags.zero = result == 0;
@@ -649,9 +635,9 @@ impl ExecutionContext {
     // Compare with accumulator
     fn cmp(&mut self, mode: AddressMode <u16>) -> AddressMode<u16> {
         let result = self.cpu.reg.a.wrapping_sub(mode.data as u8);
-        self.cpu.flags.zero = result == 0;
+        self.cpu.flags.zero = result as u8 == 0;
         self.cpu.flags.carry = self.cpu.reg.a >= mode.data as u8;
-        self.cpu.flags.negative = result & 0x80 != 0;
+        self.cpu.flags.negative = result as u8 & 0x80 != 0;
         mode
     }
     fn cpx(&mut self, value: AddressMode <u16>) -> AddressMode<u16> {
@@ -674,6 +660,7 @@ impl ExecutionContext {
 
     fn dec(&mut self, value: AddressMode <u16>) -> AddressMode<u16> {
         let result = value.data.wrapping_sub(1) as u8;
+        self.write8(value.address, result);
         self.cpu.flags.negative = (result & 0x80) != 0;
         self.cpu.flags.zero = result.trailing_zeros() >= 8;
         value
@@ -720,24 +707,21 @@ impl ExecutionContext {
         value
     }
     fn ldy(&mut self, value: AddressMode <u16>) -> AddressMode<u16> {
-        // let result = self.read8(value);
-        let result = value.data as u8;
-        self.cpu.reg.y = result;
-        self.cpu.flags.zero = result == 0;
-        self.cpu.flags.negative = (result & 0x80) != 0;
+        self.cpu.reg.y = value.data as u8;
+        self.cpu.flags.zero = self.cpu.reg.y == 0;
+        self.cpu.flags.negative = self.cpu.reg.y & 0x80 != 0;
         value
     }
     fn ldx(&mut self, value: AddressMode <u16>) -> AddressMode<u16> {
-        // debug!("ldx mode:{:x}", value);
         self.cpu.reg.x = value.data as u8;
-        self.cpu.flags.zero = value.data == 0;
-        self.cpu.flags.negative = (value.data & 0x80) != 0;
+        self.cpu.flags.zero = self.cpu.reg.x == 0;
+        self.cpu.flags.negative = (self.cpu.reg.x & 0x80) != 0;
         value
     }
     fn lda(&mut self, value: AddressMode <u16>) -> AddressMode<u16> {
         self.cpu.reg.a = value.data as u8;
-        self.cpu.flags.zero = value.data  == 0;
-        self.cpu.flags.negative = (value.data & 0x80) != 0;
+        self.cpu.flags.zero = value.data as u8 == 0;
+        self.cpu.flags.negative = (value.data as u8 & 0x80) != 0;
         value
     }
 
@@ -846,9 +830,8 @@ impl ExecutionContext {
     fn sbc(&mut self, value: AddressMode <u16>) -> AddressMode<u16> {
         let a = u16::from(self.cpu.reg.a);
         let operand = !value.data as u8;
-        let result = self.cpu.reg.a.wrapping_add(operand).wrapping_add(self.cpu.flags.carry as u8);
+        let result: u8 = self.cpu.reg.a.wrapping_add(operand).wrapping_add(self.cpu.flags.carry as u8);
         // TODO This doesn't work, find out why
-        //if result > 255 { self.cpu.flags.carry = true; }
         self.cpu.reg.a = result as u8;
         self.cpu.flags.overflow = !(a ^ operand as u16) & (a ^ result as u16) & 0x80 != 0;
        //  self.cpu.flags.overflow = (a ^ operand) & (a ^ result) & 0x80 != 0;
@@ -990,10 +973,10 @@ impl ExecutionContext {
     }
     // Increment Memory
     fn inc(&mut self, value: AddressMode <u16>) -> AddressMode<u16> {
-        // let byte = self.read_word(value) as u8;
-        self.write8(value.address, value.data as u8);
-        self.cpu.flags.carry = value.data & 0x80 != 0;
-        self.cpu.flags.zero = value.data.trailing_zeros() >= 8;
+        let v = value.data.wrapping_add(1) as u8;
+        self.write8(value.address, v);
+        self.cpu.flags.negative= v & 0x80 != 0;
+        self.cpu.flags.zero = v == 0;
         value
     }
     // Increment X (implied mode)

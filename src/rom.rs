@@ -5,7 +5,6 @@ use std::io::Read;
 use std::fs::File;
 use std::io::{Result, Error};
 use std::str;
-
 use crate::memory::Ram;
 use crate::interconnect::MemoryMapper;
 
@@ -83,8 +82,7 @@ impl MemoryMapper for Cartridge {
         }
     }
     fn read16(&self, addr: u16) -> u16 {
-        (self.read8(addr) as u16) | ((self.read8(addr + 1) as u16) << 8)
-
+        u16::from_le_bytes([self.read8(addr), self.read8(addr + 1)])
     }
     fn write8(&mut self, addr: u16, byte: u8) {
         println!("Cart write: {:04x} to ${:04x}", byte, addr);
