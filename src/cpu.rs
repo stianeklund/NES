@@ -229,10 +229,11 @@ impl ExecutionContext {
         }
     }
     fn abs_x(&self) -> AddressMode<u16> {
-        let address = self.read16(self.cpu.reg.pc + 1) + u16::from(self.cpu.reg.x);
+        let pc = self.read16(self.cpu.reg.pc + 1);
+        let address = pc + self.cpu.reg.x as u16;
         AddressMode {
             address,
-            data: u16::from(self.read8(address)),
+            data: u16::from(self.read16(address) as u8),
             byte_length: 3,
             cycle_length: 4
         }
@@ -241,7 +242,7 @@ impl ExecutionContext {
         let address: u16 = self.read16(self.cpu.reg.pc + 1) + u16::from(self.cpu.reg.y);
         AddressMode {
             address,
-            data: u16::from(self.read8(address)),
+            data: u16::from(self.read16(address) as u8),
             byte_length: 3,
             cycle_length: 4
         }
@@ -265,7 +266,7 @@ impl ExecutionContext {
         }
     }
     fn zp_x (&self) -> AddressMode <u16> {
-        let address = self.read16(self.cpu.reg.pc + 1) + u16::from(self.cpu.reg.x);
+        let address = u16::from(self.read8(self.cpu.reg.pc + 1) + self.cpu.reg.x);
         AddressMode {
             address,
             data: u16::from(self.read8(address)),
@@ -274,7 +275,8 @@ impl ExecutionContext {
         }
     }
     fn zp_y (&self) -> AddressMode <u16> {
-        let address = self.read16(self.cpu.reg.pc + 1) + u16::from(self.cpu.reg.y);
+        let address = u16::from(self.read8(self.cpu.reg.pc + 1) + self.cpu.reg.y);
+        // let address = self.read16(self.cpu.reg.pc + 1) + u16::from(self.cpu.reg.y);
         AddressMode {
             address,
             data: u16::from(self.read8(address)),
@@ -310,7 +312,6 @@ impl ExecutionContext {
         let pointer = self.read8(self.cpu.reg.pc + 1);
         let indirect =  u16::from_le_bytes([self.read8(pointer.into()), self.read8((pointer + 1).into())]);
         let address = indirect.wrapping_add(self.cpu.reg.y.into());
-        // debug!("indirect:{:0x}, address:{:0x}, data:{:0x}", indirect, address, self.read8(address));
         AddressMode {
             address,
             data: self.read8(address),
@@ -418,7 +419,7 @@ impl ExecutionContext {
             0x55 => self.eor(self.zp_x()),
             0x56 => self.lsr(self.zp_x()),
             0x59 => self.eor(self.abs_y()),
-            0x5e => self.lsr(self.abs()),
+            0x5e => self.lsr(self.abs_x()),
             0x5d => self.eor(self.abs_x()),
             0x60 => self.rts(self.implied(6)),
             0x61 => self.adc(AddressMode::from(self.indirect_x())),
@@ -493,6 +494,7 @@ impl ExecutionContext {
             0xf6 => self.inc(self.zp_x()),
             0xf7 => self.isc(AddressMode::from(self.zp())),
             0xf8 => self.sed(self.implied(2)),
+            0xf9 => self.sbc(self.abs_y()),
             0xfe => self.inc(self.abs_x()),
             0xfd => self.sbc(self.abs_x()),
             0xff => self.isc(self.abs_x()),
@@ -552,7 +554,6 @@ impl ExecutionContext {
     fn bcs(&mut self, offset: AddressMode <u8>) -> AddressMode<u16> {
         if self.cpu.flags.carry {
             self.adv_pc(u16::from(offset.data)); // add offset to pc
-            // debug!("mode:{:x}", offset);
         }
         self.check_branch(AddressMode::from(offset));
         AddressMode::from(offset)
@@ -723,7 +724,6 @@ impl ExecutionContext {
         value
     }
     fn ldy(&mut self, value: AddressMode <u16>) -> AddressMode<u16> {
-        // debug!("Loading Y with:{:x} from {:x}", value.data, value.address);
         self.cpu.reg.y = value.data as u8;
         self.cpu.flags.zero = self.cpu.reg.y as u8 == 0;
         self.cpu.flags.negative = self.cpu.reg.y as u8 & 0x80 != 0;
@@ -744,13 +744,12 @@ impl ExecutionContext {
 
     // LSR (only memory operations, see lsra for Accumulator)
     fn lsr(&mut self, value: AddressMode <u16>) -> AddressMode<u16> {
-        // let value: u8 =  self.read8(addr.);
         let data = value.data as u8;
         let result = data >> 1;
-        self.write8(value.address, result);
-        self.cpu.flags.negative = (result & 0x80) != 0;
+        self.cpu.flags.negative = result & 0x80 != 0;
         self.cpu.flags.zero = result == 0;
         self.cpu.flags.carry = (data & 0x1) != 0;
+        self.write8(value.address, result);
         value
     }
 
@@ -848,7 +847,6 @@ impl ExecutionContext {
         let a = u16::from(self.cpu.reg.a);
         let operand = !value.data as u8;
         let result: u8 = self.cpu.reg.a.wrapping_add(operand).wrapping_add(self.cpu.flags.carry as u8);
-        // TODO This doesn't work, find out why
         self.cpu.reg.a = result as u8;
         self.cpu.flags.overflow = !(a ^ operand as u16) & (a ^ result as u16) & 0x80 != 0;
        //  self.cpu.flags.overflow = (a ^ operand) & (a ^ result) & 0x80 != 0;
@@ -875,7 +873,10 @@ impl ExecutionContext {
         self.cpu.flags.zero = result == 0;
         value
     }
-    fn sta(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> { self.write8(mode.address, self.cpu.reg.a); mode }
+    fn sta(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> {
+        self.write8(mode.address, self.cpu.reg.a);
+        mode
+    }
     fn sty(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> { self.write8(mode.address, self.cpu.reg.y); mode }
     fn stx(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> { self.write8(mode.address, self.cpu.reg.x); mode }
     // Transfer Accumulator to X
