@@ -294,7 +294,8 @@ impl ExecutionContext {
     }
     fn indirect_x(&self) -> AddressMode <u8> {
         let pointer = self.read8(self.cpu.reg.pc + 1).wrapping_add(self.cpu.reg.x);
-        let indirect =  u16::from(self.read8(pointer.into())) | u16::from(self.read8(pointer.wrapping_add(1).into())) << 8;
+        let indirect = u16::from_le_bytes([self.read8(pointer.into()), self.read8((pointer + 1).into())]);
+        // let indirect =  u16::from(self.read8(pointer.into())) | u16::from(self.read8(pointer.wrapping_add(1).into())) << 8;
         AddressMode {
             address: indirect,
             data: self.read8(indirect),
@@ -303,12 +304,12 @@ impl ExecutionContext {
         }
     }
     fn indirect_y(&self) -> AddressMode <u8> {
-        let pointer = self.read8(self.cpu.reg.pc + 1);
-        let indirect = u16::from_le_bytes([self.read8(pointer as u16), self.read8(pointer as u16 + 1)]);
-        // let indirect =  u16::from(self.read8(pointer.into())) | u16::from(self.read8((pointer.wrapping_add(1) as u8) as u16)) << 8;
+        let pointer = u16::from(self.read8(self.cpu.reg.pc + 1));
+        let indirect = u16::from_le_bytes([self.read8(pointer.into()), self.read8((pointer + 1).into())]);
+        let address = indirect.wrapping_add(self.cpu.reg.y as u16);
         AddressMode {
-            address: indirect.wrapping_add(self.cpu.reg.y.into()),
-            data: self.read8(indirect),
+            address,
+            data: self.read8(address),
             byte_length: 2,
             cycle_length: 6
             // 5 or 6 cycles depending on low address byte + Y overflow
@@ -367,6 +368,7 @@ impl ExecutionContext {
             0xaf => self.lax(self.abs()),
             0xb0 => self.bcs(self.relative()),
             0xb1 => self.lda(AddressMode::from(self.indirect_y())),
+            0xb4 => self.ldy(self.zp_x()),
             0xb5 => self.lda(self.zp_x()),
             0xb6 => self.ldx(self.zp_y()),
             0xb8 => self.clv(self.implied(2)),
@@ -379,7 +381,7 @@ impl ExecutionContext {
             0xc1 => self.cmp(AddressMode::from(self.indirect_x())),
             0xc5 => self.cmp(AddressMode::from(self.zp())),
             0x40 => self.rti(self.implied(6)),
-            0x41 => self.eor(AddressMode::from(self.indirect_y())),
+            0x41 => self.eor(AddressMode::from(self.indirect_x())),
             0x4a => self.lsra(self.implied(2)),
             0x4e => self.lsr(self.abs()),
             0x4d => self.eor(self.abs()),
@@ -388,7 +390,7 @@ impl ExecutionContext {
             0x48 => self.pha(self.implied(3)),
             0x49 => self.eor(self.imm().into()),
             0x20 => self.jsr(self.abs()),
-            0x21 => self.and(AddressMode::from(self.indirect_y())),
+            0x21 => self.and(AddressMode::from(self.indirect_x())),
             0x24 => self.bit(AddressMode::from(self.zp())),
             0x25 => self.and(AddressMode::from(self.zp())),
             0x26 => self.rol(AddressMode::from(self.zp())),
@@ -398,17 +400,21 @@ impl ExecutionContext {
             0x2c => self.bit(self.abs()),
             0x2e => self.rol(self.abs()),
             0x2d => self.and(self.abs()),
+            0x3d => self.and(self.abs_x()),
             0x30 => self.bmi(AddressMode::from(self.relative())),
             0x31 => self.and(AddressMode::from(self.indirect_y())),
             0x35 => self.and(self.zp_x()),
             0x36 => self.rol(self.zp_x()),
             0x38 => self.sec(self.implied(2)),
+            0x39 => self.and(self.abs_y()),
             0x3e => self.rol(self.abs_x()),
             0x4c => self.jmp(self.abs()),
             0x50 => self.bvc(AddressMode::from(self.relative())),
-            0x51 => self.eor(AddressMode::from(self.indirect_x())),
+            0x51 => self.eor(AddressMode::from(self.indirect_y())),
             0x55 => self.eor(self.zp_x()),
+            0x56 => self.lsr(self.zp_x()),
             0x59 => self.eor(self.abs_y()),
+            0x5e => self.lsr(self.abs()),
             0x5d => self.eor(self.abs_x()),
             0x60 => self.rts(self.implied(6)),
             0x61 => self.adc(AddressMode::from(self.indirect_x())),
@@ -424,8 +430,11 @@ impl ExecutionContext {
             0x6e => self.ror(self.abs()),
             0x70 => self.bvs(self.relative()),
             0x71 => self.adc(AddressMode::from(self.indirect_y())),
+            0x75 => self.adc(self.zp_x()),
+            0x76 => self.ror(self.zp_x()),
             0x78 => self.sei(self.implied(2)),
-            0x79 => self.adc(AddressMode::from(self.indirect_y())),
+            0x79 => self.adc(self.abs_y()),
+            0x7d => self.adc(self.abs_x()),
             0x7e => self.ror(self.abs_x()),
             0x81 => self.sta(AddressMode::from(self.indirect_x())),
             0x84 => self.sty(AddressMode::from(self.zp())),
@@ -438,6 +447,7 @@ impl ExecutionContext {
             0x8e => self.stx(self.abs()),
             0x90 => self.bcc(AddressMode::from(self.relative())),
             0x91 => self.sta(AddressMode::from(self.indirect_y())),
+            0x94 => self.sty(self.zp_x()),
             0x95 => self.sta(self.zp_x()),
             0x96 => self.stx(self.zp_y()),
             0x98 => self.tya(self.implied(2)),
@@ -452,10 +462,12 @@ impl ExecutionContext {
             0xce => self.dec(self.abs()),
             0xcd => self.cmp(self.abs()),
             0xcc => self.cpy(self.abs()),
+            0xdd => self.cmp(self.abs_x()),
             0xd0 => self.bne(AddressMode::from(self.relative())),
             0xd1 => self.cmp(AddressMode::from(self.indirect_y())),
             // 0xd2 => self.hlt(mode),
             // 0xd3 | 0xdf => self.dcp(),
+            0xd5 => self.cmp(self.zp_x()),
             0xd6 => self.dec(self.zp_x()),
             0xd8 => self.cld(self.implied(2)),
             0xd9 => self.cmp(self.abs_y()),
@@ -707,9 +719,10 @@ impl ExecutionContext {
         value
     }
     fn ldy(&mut self, value: AddressMode <u16>) -> AddressMode<u16> {
+        debug!("Loading Y with:{:x} from {:x}", value.data, value.address);
         self.cpu.reg.y = value.data as u8;
-        self.cpu.flags.zero = self.cpu.reg.y == 0;
-        self.cpu.flags.negative = self.cpu.reg.y & 0x80 != 0;
+        self.cpu.flags.zero = self.cpu.reg.y as u8 == 0;
+        self.cpu.flags.negative = self.cpu.reg.y as u8 & 0x80 != 0;
         value
     }
     fn ldx(&mut self, value: AddressMode <u16>) -> AddressMode<u16> {
@@ -719,6 +732,9 @@ impl ExecutionContext {
         value
     }
     fn lda(&mut self, value: AddressMode <u16>) -> AddressMode<u16> {
+        if self.cpu.opcode == 0xb1 {
+            debug!("mode: {:x}", value);
+        }
         self.cpu.reg.a = value.data as u8;
         self.cpu.flags.zero = value.data as u8 == 0;
         self.cpu.flags.negative = (value.data as u8 & 0x80) != 0;
