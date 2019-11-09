@@ -294,8 +294,7 @@ impl ExecutionContext {
     }
     fn indirect_x(&self) -> AddressMode <u8> {
         let pointer = self.read8(self.cpu.reg.pc + 1).wrapping_add(self.cpu.reg.x);
-        let indirect = u16::from_le_bytes([self.read8(pointer.into()), self.read8((pointer + 1).into())]);
-        // let indirect =  u16::from(self.read8(pointer.into())) | u16::from(self.read8(pointer.wrapping_add(1).into())) << 8;
+        let indirect =  u16::from_le_bytes([self.read8(pointer.into()), self.read8((pointer + 1).into())]);
         AddressMode {
             address: indirect,
             data: self.read8(indirect),
@@ -304,9 +303,10 @@ impl ExecutionContext {
         }
     }
     fn indirect_y(&self) -> AddressMode <u8> {
-        let pointer = u16::from(self.read8(self.cpu.reg.pc + 1));
-        let indirect = u16::from_le_bytes([self.read8(pointer.into()), self.read8((pointer + 1).into())]);
-        let address = indirect.wrapping_add(self.cpu.reg.y as u16);
+        let pointer = self.read8(self.cpu.reg.pc + 1);
+        let indirect =  u16::from_le_bytes([self.read8(pointer.into()), self.read8((pointer + 1).into())]);
+        let address = indirect.wrapping_add(self.cpu.reg.y.into());
+        // debug!("indirect:{:0x}, address:{:0x}, data:{:0x}", indirect, address, self.read8(address));
         AddressMode {
             address,
             data: self.read8(address),
@@ -719,7 +719,7 @@ impl ExecutionContext {
         value
     }
     fn ldy(&mut self, value: AddressMode <u16>) -> AddressMode<u16> {
-        debug!("Loading Y with:{:x} from {:x}", value.data, value.address);
+        // debug!("Loading Y with:{:x} from {:x}", value.data, value.address);
         self.cpu.reg.y = value.data as u8;
         self.cpu.flags.zero = self.cpu.reg.y as u8 == 0;
         self.cpu.flags.negative = self.cpu.reg.y as u8 & 0x80 != 0;
@@ -732,9 +732,6 @@ impl ExecutionContext {
         value
     }
     fn lda(&mut self, value: AddressMode <u16>) -> AddressMode<u16> {
-        if self.cpu.opcode == 0xb1 {
-            debug!("mode: {:x}", value);
-        }
         self.cpu.reg.a = value.data as u8;
         self.cpu.flags.zero = value.data as u8 == 0;
         self.cpu.flags.negative = (value.data as u8 & 0x80) != 0;
