@@ -182,7 +182,7 @@ impl Instruction {
             0xd8 => "CLD",
             0xd9 => "CMP",
             0xdf => "DCP",
-            0xee => "ROL",
+            0xee => "INC",
             0xe0 => "CPX",
             0xe4 => "CPX",
             0xe5 => "SBC",

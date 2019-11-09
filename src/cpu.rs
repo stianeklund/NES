@@ -229,7 +229,7 @@ impl ExecutionContext {
         }
     }
     fn abs_x(&self) -> AddressMode<u16> {
-        let address = self.read16(self.cpu.reg.pc) + u16::from(self.cpu.reg.x);
+        let address = self.read16(self.cpu.reg.pc + 1) + u16::from(self.cpu.reg.x);
         AddressMode {
             address,
             data: u16::from(self.read8(address)),
@@ -238,11 +238,11 @@ impl ExecutionContext {
         }
     }
     fn abs_y(&self) -> AddressMode <u16> {
-        let address: u16 = self.read16(self.cpu.reg.pc) + u16::from(self.cpu.reg.y);
+        let address: u16 = self.read16(self.cpu.reg.pc + 1) + u16::from(self.cpu.reg.y);
         AddressMode {
             address,
             data: u16::from(self.read8(address)),
-            byte_length: 2,
+            byte_length: 3,
             cycle_length: 4
         }
     }
@@ -282,12 +282,16 @@ impl ExecutionContext {
             cycle_length: 4
         }
     }
-    // JMP uses this
     fn indirect(&self) -> AddressMode <u16> {
-        let address = self.read16(self.cpu.reg.pc);
+        let addr = self.read16(self.cpu.reg.pc + 1);
+        let lo = self.read8(addr);
+        // CPU Bug?
+        let hi = self.read8((addr & 0xff00) | ((addr + 1) & 0x00ff));
+        // let hi = self.read8((addr) | (addr + 1));
+        let address = (hi as u16) << 8 | lo as u16;
         AddressMode {
             address,
-            data: self.read16(address),
+            data: self.read8(address) as u16,
             byte_length: 3,
             cycle_length: 5
         }
