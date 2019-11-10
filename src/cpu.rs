@@ -15,16 +15,29 @@ impl MemoryMapper for ExecutionContext {
         match addr {
             0 ..= 0x07ff => self.ram.memory[addr as usize] as u8,
             0x0800 ..= 0x1fff => self.ram.memory[addr as usize & 0x07ff],
-            0x2000 ..= 0x3fff => self.ppu.read8(addr),
+            0x2000 => self.ppu.reg.ppu_ctrl.value,
+            0x2001 => self.ppu.reg.ppu_mask.data,
+            0x2002 => self.ppu.reg.ppu_status.value,// self.ppu.reg.ppu_status,
+            0x2003 => self.ppu.reg.oam_addr.addr as u8,
+            0x2004 => self.ppu.reg.oam_data.value,
+            0x2005 => self.ppu.reg.ppu_scroll.value,
+            0x2006 => self.ppu.reg.ppu_data.data,
+            0x2007 => self.ppu.reg.oam_data.value,
+            0x2008 ..= 0x3fff => self.ppu.read8(addr),
+            0x4014 => self.ppu.reg.oam_dma.data,
+            0x4015 => self.apu.reg.status,
             0x4000 ..= 0x4017 => self.apu.read8(addr),
             0x4018 ..= 0x401f => unimplemented!("Read to CPU Test space"),
+            0x4020 ..= 0x5fff => unimplemented!("Read to expansion rom"),
             // $6000-$7FFF = Battery Backed Save or Work RAM
             0x6000 ..= 0x7fff => self.ram.sram[addr as usize] as u8,
             0x8000 ..= 0xffff => {
                 let mask_amount = if self.cart.header.prg_rom_page_size != 1 { 0x7fff } else { 0x3fff };
                 self.cart.prg[addr as usize & mask_amount]
             },
-            _ => unimplemented!("Reads to ${:04x} is not implemented", addr),
+            _ => unimplemented!("Read to ${:04x} by {}. Not implemented or not supported",
+                                addr,
+                                Instruction::short_mnemonic(self.cpu.opcode)),
         }
     }
     fn write8(&mut self, addr: u16, byte: u8) {
@@ -162,7 +175,7 @@ impl ExecutionContext {
             cpu: Cpu::default(),
             cart: Cartridge::default(),
             ram: Ram::default(),
-            ppu: Ppu::default(),
+            ppu: Ppu::new(),
             apu: Apu::default(),
             debug: false,
         }
@@ -335,10 +348,11 @@ impl ExecutionContext {
                   self.cpu.p, self.cpu.reg.sp);
         }
         let mode: AddressMode<u16> = match opcode {
-            0x00 | 0x02 => ::std::process::exit(0x100), // self.brk(),
+            0x00 | 0x02 => self.brk(self.implied(7)),
             0x01 => self.ora(AddressMode::from(self.indirect_x())),
-            // 0x03 => self.slo(&self.indirect_x()),
+            0x03 => self.slo(AddressMode::from(self.indirect_x())),
             0x0c => self.top(self.abs()),
+            0x0f => self.slo(self.abs()),
             0x1a | 0x3a | 0x5a | 0x7a | 0xda | 0xfa | 0x72 | 0x73 | 0xea => self.nop(),
             0x1c | 0x3c | 0x5c | 0x7c | 0xdc | 0xfc => self.top(self.abs_x()),
             0x04 => self.dop(AddressMode::from(self.zp())),
@@ -639,14 +653,12 @@ impl ExecutionContext {
         self.check_branch(AddressMode::from(value));
         AddressMode::from(value)
     }
-    fn brk(&mut self) -> AddressMode<u16> {
+    fn brk(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> {
         self.cpu.flags.brk = true;
         self.push_word(self.cpu.reg.pc + 1);
         // Set PC to IRQ vector
         self.cpu.reg.pc = self.read16(0xfffe);
-        // For now Panic here
-        // panic!("BRK PC:{:04x}", self.cpu.reg.pc);
-        AddressMode::with_byte_length(self.cpu.reg.pc, u16::from(self.read8(self.cpu.reg.pc)), 1, 7)
+        mode
     }
     // Test Bits N Z V
     fn bit(&mut self, value: AddressMode <u16>) -> AddressMode<u16> {

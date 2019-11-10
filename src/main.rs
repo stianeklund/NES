@@ -12,6 +12,7 @@ mod memory;
 mod cpu;
 mod ppu;
 mod apu;
+mod ppu_registers;
 
 use std::path::Path;
 use std::io::{self, Read};
@@ -39,10 +40,7 @@ fn main() {
         .start()
         .unwrap();
 
-    // TODO Cleanup use interconnect instead
-    // Make CPU more ergonomic to use.
-    // let mut inter = Interconnect::new();
-    // Interconnect could be handling the below instead of `ExecutionContext`
+    debug!("Loaded rom:{:?}", path.file_name().unwrap());
 
     let mut ctx = ExecutionContext::new();
     ctx.reset();
@@ -55,12 +53,11 @@ fn main() {
     // println!("IRQ Vector:   {:04x}", ctx.read16(0xfffe));
     ctx.cpu.reg.pc = ctx.read16(0xfffc);
     // For nestest only
-    ctx.cpu.reg.pc = 0xc000;
+    // ctx.cpu.reg.pc = 0xc000;
 
     let test_output = ctx.read8(0x6000);
     let err1 = ctx.read8(0x02);
     let err2 = ctx.read8(0x03);
-    // eprintln!("{:x} {:x}", ctx.read8(0x02), ctx.read8(0x03));
 
     loop {
         let step: bool = false;
@@ -69,13 +66,12 @@ fn main() {
         }
         ctx.decode();
         if test_output != 0 {
-            eprintln!("{:x}", test_output);
+            eprintln!("Test output:{:x}", test_output);
         }
-        if err1 != 0 {
-            eprintln!("{:x}", err1);
+        if err1 | err2 != 0 {
+            eprintln!("{:x} {:x}", ctx.read8(0x02), ctx.read8(0x03));
         }
-        if err2 != 0 {
-            eprintln!("{:x}", err2);
-        }
+
+
     }
 }

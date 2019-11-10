@@ -13,15 +13,15 @@ pub struct Apu {
 // APU registers
 #[derive(Default, Debug)]
 pub struct Registers {
-    pulse_1: u8,
-    pulse_2: u8,
-    triangle: u8,
-    noise: u8,
-    dmc: u8,
-    control: u8,
-    status: u8,
-    frame_counter: u8,
-    cycles: u8,
+    pub pulse_1: u8,
+    pub pulse_2: u8,
+    pub triangle: u8,
+    pub noise: u8,
+    pub dmc: u8,
+    pub control: u8,
+    pub status: u8,
+    pub frame_counter: u8,
+    pub pycles: u8,
 }
 
 impl MemoryMapper for Apu {
