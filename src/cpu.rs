@@ -514,7 +514,7 @@ impl ExecutionContext {
             0xfd => self.sbc(self.abs_x()),
             0xff => self.isc(self.abs_x()),
             0x1e => self.asl(self.abs_x()),
-            _ => unimplemented!("Unknown opcode:{:04x}", opcode),
+            _ => unimplemented!("Unknown opcode:{:02x}", opcode),
         };
         self.adv(mode);
     }
@@ -1060,6 +1060,13 @@ impl ExecutionContext {
         self.cpu.flags.negative = (result & 0x80) != 0;
         self.cpu.reg.a = result as u8;
         value
+    }
+    pub fn nmi(&mut self) {
+        let flags = self.get_status_flags();
+        self.push_word(self.cpu.reg.pc);
+        self.push_byte(flags);
+        // NMI vector
+        self.cpu.reg.pc = self.read16(0xfffa);
     }
     // Reset CPU to initial power up state
     pub fn reset(&mut self) {
