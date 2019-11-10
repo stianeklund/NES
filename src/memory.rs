@@ -1,17 +1,13 @@
 use std::ops::{Index, IndexMut};
 use std::fmt::{UpperHex, LowerHex};
 use std::fmt::{Debug, Formatter, Result};
-use std::path::Path;
-use std::fs::File;
-use std::io::Read;
-use rom::{Cartridge, RomHeader};
+use crate::rom::{Cartridge, RomHeader};
 
 
 pub struct Ram {
     pub memory: Box<[u8; 0x800]>,
     pub sram: Box<[u8; 0x8000]>
 }
-
 
 impl Index<u16> for Ram {
     type Output = u8;

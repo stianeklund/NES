@@ -1,4 +1,3 @@
-
 use std::ops::{Index, IndexMut};
 use std::ops::{Range, RangeTo};
 use std::path::Path;
@@ -6,8 +5,8 @@ use std::io::Read;
 use std::fs::File;
 use std::io::{Result, Error};
 use std::str;
-use memory::Ram;
-use interconnect::MemoryMapper;
+use crate::memory::Ram;
+use crate::interconnect::MemoryMapper;
 
 /* ******************************************************************************************** */
 // iNES HEADER INFORMATION
@@ -72,8 +71,7 @@ impl IndexMut<u16> for Cartridge {
 }
 
 impl MemoryMapper for Cartridge {
-    fn read(&mut self, addr: u16) -> u8 {
-        // let addr = self.mask_addr(addr);
+    fn read8(&self, addr: u16) -> u8 {
         println!("Cart read: ${:04x}", addr);
         match addr {
             0 ..= 0x07ff => panic!("Trying to read RAM from Cartridge"),
@@ -83,17 +81,16 @@ impl MemoryMapper for Cartridge {
             _ => panic!("Unrecognized read address: {:04x}", addr)
         }
     }
-    fn read16(&mut self, addr: u16) -> u16 {
-        (self.read(addr) as u16) | ((self.read(addr + 1) as u16) << 8)
-
+    fn read16(&self, addr: u16) -> u16 {
+        u16::from_le_bytes([self.read8(addr), self.read8(addr + 1)])
     }
-    fn write(&mut self, addr: u16, byte: u8) {
+    fn write8(&mut self, addr: u16, byte: u8) {
         println!("Cart write: {:04x} to ${:04x}", byte, addr);
         match addr {
-            0 ..= 0x07ff => self.write(addr, byte),
-            0x0800 ..= 0x1fff => self.write(addr, byte),
-            0x2000 ..= 0x3fff => self.write(addr, byte),
-            0x8000 ..= 0xffff => self.write(addr, byte),
+            0 ..= 0x07ff => self.write8(addr, byte),
+            0x0800 ..= 0x1fff => self.write8(addr, byte),
+            0x2000 ..= 0x3fff => self.write8(addr, byte),
+            0x8000 ..= 0xffff => self.write8(addr, byte),
             _ => eprintln!("Unable to write to memory address"),
         }
     }

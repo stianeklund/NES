@@ -1,7 +1,8 @@
-use interconnect::{MemoryMapper, Interconnect};
 use minifb::{Scale, WindowOptions, Window};
 use std::fmt::{Debug, Formatter, Result};
 use std::fmt::LowerHex;
+
+use crate::interconnect::{MemoryMapper, Interconnect};
 
 pub const WIDTH: u32 = 240;
 pub const HEIGHT: u32 = 256;
@@ -145,9 +146,10 @@ impl Debug for Registers {
 // The PPU addresses a 16kB space, $0000-3FFF.
 // TODO Improve mapper to handle writes to registers that have write enable
 impl MemoryMapper for Ppu {
-        fn read(&mut self, addr: u16) -> u8 {
+        fn read8(&self, addr: u16) -> u8 {
             println!("PPU Read ${:04x}", addr);
-            self.cycle = self.cycle.wrapping_add(1);
+            // TODO figure out how to increment a cycle for each ppu read
+            // self.cycle = self.cycle.wrapping_add(1);
         match addr {
             0 ..= 0x1fff => self.chr[addr as usize],
             // TODO PPU Mirror? Is PPU size to `$3fff`?
@@ -156,6 +158,7 @@ impl MemoryMapper for Ppu {
             0x2001 => self.reg.ppu_mask,
             // https://wiki.nesdev.com/w/index.php/PPU_registers#PPUSTATUS
             0x2002 => self.reg.ppu_status,
+            0x2003 => self.reg.oam_addr,
             // R/W to this addr should increment VRAM by amount specified at $2000:2
             0x2007 => self.reg.ppu_data,
             0x2008 ..= 0x2fff => self.vram[addr as usize],
@@ -164,7 +167,7 @@ impl MemoryMapper for Ppu {
             _ => panic!("PPU Read: unrecognized address ${:04x}", addr)
         }
     }
-    fn write(&mut self, addr: u16, byte: u8) {
+    fn write8(&mut self, addr: u16, byte: u8) {
         match addr {
             0 ..= 0x1fff => self.chr[addr as usize] = byte,
             0x2000 => self.reg.ppu_ctrl_write(byte),
