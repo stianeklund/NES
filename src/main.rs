@@ -48,9 +48,9 @@ fn main() {
 
     // For debugging purposes
     // Get word at memory location 0xfffc and set PC value.
-    // println!("Reset Vector: {:04x}", ctx.read16(0xfffc));
-    // println!("NMI Vector:   {:04x}", ctx.read16(0xfffa));
-    // println!("IRQ Vector:   {:04x}", ctx.read16(0xfffe));
+    println!("Reset Vector: {:04x}", ctx.read16(0xfffc));
+    println!("NMI Vector:   {:04x}", ctx.read16(0xfffa));
+    println!("IRQ Vector:   {:04x}", ctx.read16(0xfffe));
     ctx.cpu.reg.pc = ctx.read16(0xfffc);
     // For nestest only
     // ctx.cpu.reg.pc = 0xc000;
@@ -65,6 +65,7 @@ fn main() {
             io::stdin().read_line(&mut String::new()).unwrap();
         }
         ctx.decode();
+        ctx.ppu.step();
         if test_output != 0 {
             eprintln!("Test output:{:x}", test_output);
         }

@@ -51,7 +51,7 @@ impl Instruction {
         match opcode {
             0x00 => "BRK",
             0x01 => "ORA",
-            0x02 => "KIL",
+            0x02 => "BRK",
             0x03 => "SLO",
             0x04 => "*NOP",
             0x44 => "*NOP",

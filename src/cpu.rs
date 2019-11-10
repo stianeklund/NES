@@ -10,31 +10,23 @@ use std::fmt::{LowerHex, Formatter, Error};
 impl MemoryMapper for ExecutionContext {
     fn read8(&self, addr: u16) -> u8 {
         // self.adv_cycles(1);
-
         // See https://wiki.nesdev.com/w/index.php/CPU_memory_map
         match addr {
-            0 ..= 0x07ff => self.ram.memory[addr as usize] as u8,
+            0x0000 ..= 0x07ff => self.ram.memory[addr as usize],
             0x0800 ..= 0x1fff => self.ram.memory[addr as usize & 0x07ff],
-            0x2000 => self.ppu.reg.ppu_ctrl.value,
-            0x2001 => self.ppu.reg.ppu_mask.data,
-            0x2002 => self.ppu.reg.ppu_status.value,// self.ppu.reg.ppu_status,
-            0x2003 => self.ppu.reg.oam_addr.addr as u8,
-            0x2004 => self.ppu.reg.oam_data.value,
-            0x2005 => self.ppu.reg.ppu_scroll.value,
-            0x2006 => self.ppu.reg.ppu_data.data,
-            0x2007 => self.ppu.reg.oam_data.value,
-            0x2008 ..= 0x3fff => self.ppu.read8(addr),
-            0x4014 => self.ppu.reg.oam_dma.data,
-            0x4015 => self.apu.reg.status,
+            0x2000 ..= 0x2001 => self.ppu.dummy_read(addr),
+            0x2002 ..= 0x2007 => self.ppu.read_ppu(addr),
+            0x2008 ..= 0x3fff => self.ppu.read_ppu(addr % 8),
             0x4000 ..= 0x4017 => self.apu.read8(addr),
-            0x4018 ..= 0x401f => unimplemented!("Read to CPU Test space"),
-            0x4020 ..= 0x5fff => unimplemented!("Read to expansion rom"),
+            0x4018 ..= 0x401f => unimplemented!("Read to CPU Test space. Address:{:04x}", addr),
+            0x4020 ..= 0x5fff => unimplemented!("Read to expansion rom. Address:{:04x}", addr),
             // $6000-$7FFF = Battery Backed Save or Work RAM
             0x6000 ..= 0x7fff => self.ram.sram[addr as usize] as u8,
             0x8000 ..= 0xffff => {
+                // This support NROM mapping only
                 let mask_amount = if self.cart.header.prg_rom_page_size != 1 { 0x7fff } else { 0x3fff };
                 self.cart.prg[addr as usize & mask_amount]
-            },
+            }
             _ => unimplemented!("Read to ${:04x} by {}. Not implemented or not supported",
                                 addr,
                                 Instruction::short_mnemonic(self.cpu.opcode)),
@@ -49,8 +41,8 @@ impl MemoryMapper for ExecutionContext {
             // providing 2 nametables with a mirroring configuration controlled by the cartridge,
             // but it can be partly or fully remapped to RAM on the cartridge,
             // allowing up to 4 simultaneous nametables.
-
-            0x2000 ..= 0x3fff => self.ppu.write8(addr,byte),
+            0x2000 ..= 0x2007 => self.ppu.write_ppu(addr,byte),
+            0x2008 ..= 0x3fff => self.ppu.write_ppu(addr,byte),
             0x4000 ..= 0x4017 => self.apu.write8(addr, byte),
             0x6000 ..= 0x7fff => { self.ram.sram[addr as usize] = byte; },
             // Some tests store ASCII characters in SRAM. Output as characters when writing to SRAM
@@ -65,7 +57,7 @@ impl MemoryMapper for ExecutionContext {
         }
     }
 }
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Copy, Clone)]
 pub struct AddressMode<T> {
     address: u16,
     data: T,
@@ -352,7 +344,7 @@ impl ExecutionContext {
             0x01 => self.ora(AddressMode::from(self.indirect_x())),
             0x03 => self.slo(AddressMode::from(self.indirect_x())),
             0x0c => self.top(self.abs()),
-            0x0f => self.slo(self.abs()),
+            // 0x0f => self.slo(self.abs()),
             0x1a | 0x3a | 0x5a | 0x7a | 0xda | 0xfa | 0x72 | 0x73 | 0xea => self.nop(),
             0x1c | 0x3c | 0x5c | 0x7c | 0xdc | 0xfc => self.top(self.abs_x()),
             0x04 => self.dop(AddressMode::from(self.zp())),
@@ -389,7 +381,7 @@ impl ExecutionContext {
             0xad => self.lda(self.abs()),
             0xae => self.ldx(self.abs()),
             0xaf => self.lax(self.abs()),
-            0xb0 => self.bcs(self.relative()),
+            0xb0 => self.bcs(AddressMode::from(self.relative())),
             0xb1 => self.lda(AddressMode::from(self.indirect_y())),
             0xb4 => self.ldy(self.zp_x()),
             0xb5 => self.lda(self.zp_x()),
@@ -580,12 +572,14 @@ impl ExecutionContext {
         value
     }
     // Branch if Carry Set
-    fn bcs(&mut self, offset: AddressMode <u8>) -> AddressMode<u16> {
+    fn bcs(&mut self, offset: AddressMode <u16>) -> AddressMode<u16> {
+        let data = offset.data;
+        let v = offset;
         if self.cpu.flags.carry {
-            self.adv_pc(u16::from(offset.data)); // add offset to pc
+            self.adv_pc(data); // add offset to pc
         }
-        self.check_branch(AddressMode::from(offset));
-        AddressMode::from(offset)
+        self.check_branch(offset);
+        offset
     }
     fn bcc(&mut self, offset: AddressMode <u16>) -> AddressMode<u16> {
         if !(self.cpu.flags.carry) {
@@ -905,7 +899,7 @@ impl ExecutionContext {
     // Shift left one bit in memory, then OR the result with the accumulator
     // Part of undocumented opcodes
     fn slo(&mut self, value: AddressMode <u16>) -> AddressMode<u16> {
-        let result = value.data << 1;
+        let result = (value.data as u8) << 1;
         self.cpu.reg.a |= result as u8;
         self.cpu.flags.carry = result & 0x80 != 0;
         self.cpu.flags.zero = result == 0;
@@ -1085,6 +1079,7 @@ impl ExecutionContext {
         // TODO PPU reset
         // Read reset vector
         self.cpu.reg.pc = self.read16(0xfffc);
+        // self.cpu.reg.pc = (self.read8(0xfffc) as u16) << 8 | (self.read8(0xfffd) as u16);
         self.cpu.reg.sp = 0xfd;
         self.cpu.flags.carry = false;
         self.cpu.flags.zero = false;
