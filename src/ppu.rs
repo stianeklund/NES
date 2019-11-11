@@ -86,10 +86,7 @@ impl Ppu {
     pub fn write_ppu_reg(&mut self, addr: u16, byte: u8) {
         self.addr = addr;
         match addr {
-            0x2000 => {
-                self.reg.write_ppu_ctrl(byte);
-                self.vblank_nmi = (byte >> 7) & 1 == 0;
-            },
+            0x2000 => { self.reg.write_ppu_ctrl(byte); },
             0x2001 => self.reg.write_ppu_mask(byte),
             0x2002 => panic!("Writes to PPUSTATUS is not allowed"),
             0x2003 => self.reg.write_oam_addr(byte),

@@ -16,9 +16,15 @@ impl MemoryMapper for ExecutionContext {
             0x0000..=0x07ff => self.ram.memory[addr as usize],
             0x0800..=0x1fff => self.ram.memory[addr as usize & 0x07ff],
             0x2000..=0x2001 => self.ppu.borrow_mut().dummy_read(addr), // Returns 0
-            0x2002..=0x2007 => self.ppu.borrow_mut().read_ppu_reg(addr),
-            0x2008..=0x3fff => self.ppu.borrow_mut().read_ppu_reg(addr % 8),
-            0x4000..=0x4017 => self.apu.read8(addr),
+            0x2002 => self.ppu.borrow_mut().reg.read_status(),
+            0x2003 => self.ppu.borrow_mut().dummy_read(addr),
+            0x2004 => self.ppu.borrow_mut().reg.read_oam_data(),
+            0x2005 => self.ppu.borrow_mut().dummy_read(addr),
+            0x2006 => 0, // Hack writing to PPUAADR is not allowed // self.ppu.borrow_mut().dummy_read(addr),
+            0x2007 => self.ppu.borrow_mut().reg.read_ppu_data(),
+            0x2008..=0x3fff => self.ppu.borrow_mut().read_ppu_reg(addr % 2),
+            0x4000..=0x4013 => self.apu.read8(addr),
+            0x4016 => 0, // Controller input
             0x4018..=0x401f => 0, //  unimplemented!("Read to CPU Test space. Address:{:04x}", addr),
             0x4020..=0x5fff => 0, // unimplemented!("Read to expansion rom. Address:{:04x}", addr),
             // $6000-$7FFF = Battery Backed Save or Work RAM
@@ -46,10 +52,11 @@ impl MemoryMapper for ExecutionContext {
             // providing 2 nametables with a mirroring configuration controlled by the cartridge,
             // but it can be partly or fully remapped to RAM on the cartridge,
             // allowing up to 4 simultaneous nametables.
-            0x2000 ..= 0x2007 => self.ppu.borrow_mut().write_ppu_reg(addr,byte),
-            0x2008 ..= 0x3fff => self.ppu.borrow_mut().write_ppu_reg(addr % 8, byte),
-            0x4000 ..= 0x4017 => self.apu.write8(addr, byte),
-            0x6000 ..= 0x7fff => { self.ram.sram[addr as usize] = byte; },
+            0x2000..=0x2007 => self.ppu.borrow_mut().write_ppu_reg(addr,byte),
+            0x2008..=0x3fff => self.ppu.borrow_mut().write_ppu_reg(addr % 8, byte),
+            0x4000..=0x4013 => self.apu.write8(addr, byte),
+            0x4015..=0x4017 => eprintln!("Writing to non implemented controller ports"),
+            0x6000..=0x7fff => self.ram.sram[addr as usize] = byte,
             // Some tests store ASCII characters in SRAM. Output as characters when writing to SRAM
             // println!("Status: {:04x}", self.ram.sram[0x6000]);
             0x8000 ..= 0xffff => self.cart.prg[addr as usize & 0x3fff] = byte,
@@ -200,7 +207,7 @@ impl ExecutionContext {
         }
     }
     fn implied(&self, cycles:u8) -> AddressMode<u16> {
-        let address = self.cpu.reg.pc;
+        let address = self.cpu.reg.pc + 1;
         AddressMode {
             address,
             data: u16::from(self.read8(address)),
@@ -594,6 +601,7 @@ impl ExecutionContext {
     // Branch on Equal
     fn beq(&mut self, offset: AddressMode <u16>) -> AddressMode<u16> {
         if self.cpu.flags.zero {
+            // eprintln!("offset:{:x}", offset);
             self.adv_pc(offset.data);
         }
         self.check_branch(offset);
@@ -1070,6 +1078,7 @@ impl ExecutionContext {
     pub fn nmi(&mut self) {
         let flags = self.get_status_flags();
         self.push_word(self.cpu.reg.pc);
+        // self.push_word(self.cpu.reg.pc);
         self.push_byte(flags);
         // NMI vector
         self.cpu.reg.pc = self.read16(0xfffa);

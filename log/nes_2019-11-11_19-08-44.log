@@ -1,0 +1,17 @@
+DEBUG [nes] Loaded rom:"nestest.nes"
+INFO [nes::cpu] C004  78 D8     SEI A:00 X:00 Y:00 P:24 SP:FD
+INFO [nes::cpu] C005  D8 A2     CLD A:00 X:00 Y:00 P:24 SP:FD
+INFO [nes::cpu] C006  A2 FF     LDX A:00 X:00 Y:00 P:24 SP:FD
+INFO [nes::cpu] C008  9A AD     TXS A:00 X:FF Y:00 P:A4 SP:FD
+INFO [nes::cpu] C009  AD 02     LDA A:00 X:FF Y:00 P:A4 SP:FF
+INFO [nes::cpu] C00C  10 FB     BPL A:00 X:FF Y:00 P:26 SP:FF
+INFO [nes::cpu] C01E  8D 05     STA A:00 X:FF Y:00 P:26 SP:FF
+INFO [nes::cpu] C021  AD 02     LDA A:00 X:FF Y:00 P:26 SP:FF
+INFO [nes::cpu] C024  A2 20     LDX A:00 X:FF Y:00 P:26 SP:FF
+INFO [nes::cpu] C026  8E 06     STX A:00 X:20 Y:00 P:24 SP:FF
+INFO [nes::cpu] C029  A2 00     LDX A:00 X:20 Y:00 P:24 SP:FF
+INFO [nes::cpu] C02B  8E 06     STX A:00 X:00 Y:00 P:26 SP:FF
+INFO [nes::cpu] C02E  A2 00     LDX A:00 X:00 Y:00 P:26 SP:FF
+INFO [nes::cpu] C030  A0 0F     LDY A:00 X:00 Y:00 P:26 SP:FF
+INFO [nes::cpu] C032  A9 00     LDA A:00 X:00 Y:0F P:24 SP:FF
+INFO [nes::cpu] C034  8D 07     STA A:00 X:00 Y:0F P:26 SP:FF

@@ -21,6 +21,7 @@ use interconnect::{Interconnect, MemoryMapper};
 use cpu::ExecutionContext;
 use flexi_logger::{Logger, LogTarget, opt_format, default_format};
 use log::{info, error, warn, debug};
+use std::borrow::BorrowMut;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -65,6 +66,14 @@ fn main() {
         }
         ctx.decode();
         ctx.ppu.borrow_mut().step();
+        if ctx.ppu.borrow_mut().vblank_nmi {
+            eprintln!("NMI enabled");
+        }
+        if ctx.ppu.borrow_mut().vblank_nmi {
+            ctx.nmi();
+            ctx.ppu.borrow_mut().vblank_nmi = false;
+            eprintln!("Executing NMI");
+        }
         /*if test_output != 0 {
             eprintln!("Test output:{:x}", test_output);
         }*/
