@@ -1,5 +1,6 @@
 use std::fmt::LowerHex;
 use std::fmt::{Debug, Formatter, Result};
+use super::ppu::Ppu;
 #[derive(Debug, Default)]
 pub struct Registers {
     pub ppu_ctrl: PpuCtrl,
@@ -46,7 +47,7 @@ pub struct PpuStatus {
 }
 // OAMADDR $2003 (write)
 #[derive(Debug, Default)]
-pub struct OamAddr { pub oam_addr: u8 }
+pub struct OamAddr { pub addr : usize }
 // OAMDATA (read/write)
 #[derive(Debug, Default)]
 pub struct OamData { pub oam_data: Vec<u8> }
@@ -55,7 +56,7 @@ pub struct OamData { pub oam_data: Vec<u8> }
 pub struct PpuScroll { pub data: u8 }
 // PPUADDR  $2006 (write)
 #[derive(Debug, Default)]
-pub struct PpuAddr { pub data: u8 }
+pub struct PpuAddr { pub addr: u8 }
 // PPUDATA $2007 (read/write)
 // VRAM read/write data register. After access, the video memory address will increment by an amount determined by bit 2 of $2000.
 #[derive(Debug, Default)]
@@ -87,6 +88,7 @@ impl Registers {
         self.ppu_ctrl.master_slave_select = (value >> 6) & 1;
         self.ppu_ctrl.nmi_result = (value >> 7) & 1;
         // eprintln!("PPUCTRL:{:x?}", self.ppu_ctrl);
+        eprintln!("Background PPU Table Addr:{:04x}", self.ppu_ctrl.backgrnd_pattern_table_addr);
     }
     pub fn write_ppu_mask(&mut self, value: u8) {
         self.ppu_mask.greyscale = value & 1;
@@ -98,38 +100,40 @@ impl Registers {
         self.ppu_mask.emphasize_green = (value >> 6) & 1;
         self.ppu_mask.emphasize_blue = (value >> 7) & 1;
     }
-    pub fn read_status(&self)  -> u8 {
+    pub fn read_status(&mut self) -> u8 {
         let mut result = 0;
         result |= self.ppu_status.sprite_overflow << 5;
         result |= self.ppu_status.sprite_zero_hit << 6;
         result |= self.ppu_status.vblank_start << 7;
+        self.ppu_status.vblank_start = 0;
         result
     }
-    pub fn write_oam_addr(&mut self, value: u8) {
-        self.oam_addr.oam_addr = value;
+    pub fn write_oam_addr(&mut self, addr: usize) {
+        self.oam_addr.addr = addr;
     }
     pub fn write_oam_data(&mut self, value: u8) {
-        self.oam_data.oam_data.push(value);
-        self.oam_addr.oam_addr += 1; // writes to oam_data increment the address
+        let addr = self.oam_addr.addr;
+        // self.oam_data.oam_data[self.oam_addr] = value;;
+        self.oam_data.oam_data[addr] = value;
+        self.oam_addr.addr += 1;
+
     }
-    pub fn read_oam_addr(&self) -> u8 {
-        self.oam_addr.oam_addr
-    }
+    pub fn read_oam_addr(&self) -> u8 { self.oam_addr.addr as u8 }
     pub fn read_oam_data(&self) -> u8 {
-        self.oam_data.oam_data[self.oam_addr.oam_addr as usize]
+        eprintln!("Reading OAM, ADDR:{:04x}", self.oam_addr.addr);
+        self.oam_data.oam_data[self.oam_addr.addr as usize] as u8
     }
-    pub fn write_ppu_scroll(&mut self, value: u8) {
-        self.ppu_scroll.data = value;
+    pub fn write_ppu_scroll(&mut self, value: u8) { self.ppu_scroll.data = value; }
+    pub fn write_ppu_addr(&mut self, addr: u8) {
+        // Writes to $2006 need to be done twice, once for the high byte and once for the low byte
+        // This address points for example to the pallet location (PPU Address $3f00 - $3f10
+        self.ppu_addr.addr = addr;
     }
-    pub fn write_ppu_addr(&mut self, value: u8) {
-        self.ppu_addr.data = value;
-    }
-    pub fn write_ppu_data(&mut self, value: u8) {
-        self.ppu_data.data = value;
-    }
+    pub fn write_ppu_data(&mut self, value: u8) { self.ppu_data.data = value; }
     pub fn read_ppu_data(&mut self) -> u8 {
-        self.ppu_data.data += 1; // Increment PPUADDR's data on reads
-        self.ppu_data.data
+        let data = self.ppu_data.data;
+        self.ppu_addr.addr += 1; // Increment $2006 PPUADDR's addr on reads
+        data
     }
     pub fn write_oam_dma(&mut self, value:u8) {
         self.oam_dma.data = value;

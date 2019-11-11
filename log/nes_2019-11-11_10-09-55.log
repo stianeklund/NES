@@ -1,3 +1,0 @@
-DEBUG [nes] Loaded rom:"donkey kong.nes"
-INFO [nes::cpu] C79E  78 D8     SEI A:00 X:00 Y:00 P:24 SP:FD
-INFO [nes::cpu] C79F  D8 A9     CLD A:00 X:00 Y:00 P:24 SP:FD

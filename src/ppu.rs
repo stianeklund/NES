@@ -23,8 +23,8 @@ pub struct Ppu {
     pub frame_complete: bool,
 
     // Interrupt Flags
-    pub vblank_nmi: bool,
-    pub nmi: bool,
+    pub vblank: bool,
+    pub nmi_occurred: bool,
 
     pub system_palette: Vec<u8>,
     pub frame_palette: Vec<u8>,
@@ -70,8 +70,8 @@ impl Ppu {
             scanline: 0,
             frame_complete: false,
 
-            vblank_nmi: false,
-            nmi: false,
+            vblank: false,
+            nmi_occurred: false,
             pattern_tables: vec![0; 0x2000],
             system_palette: vec![0; 64],
             frame_palette: vec![0; 8],
@@ -89,7 +89,7 @@ impl Ppu {
             0x2000 => { self.reg.write_ppu_ctrl(byte); },
             0x2001 => self.reg.write_ppu_mask(byte),
             0x2002 => panic!("Writes to PPUSTATUS is not allowed"),
-            0x2003 => self.reg.write_oam_addr(byte),
+            0x2003 => self.reg.write_oam_addr(byte as usize),
             0x2004 => self.reg.write_oam_data(byte),
             0x2005 => self.reg.write_ppu_scroll(byte),
             0x2006 => self.reg.write_ppu_addr(byte),
@@ -116,22 +116,16 @@ impl Ppu {
         result
     }
     pub fn dummy_read(&mut self, _addr: u16) -> u8 {
-        // Reads to `$2000` are illegal, just do a dummy read
-        self.increment();
-        self.increment();
-        // eprintln!("We've incremented the PPU cycle, old:{:x}, new:{:x}", old, self.cycle);
-        // Return 0 for now
+        eprintln!("PPU Dummy Read: ${:04x}", _addr);
+        self.cycle += 2;
         0_u8
-    }
-    pub fn increment(&mut self) {
-        self.cycle +=1;
     }
 
     // PPU Reset
-    pub fn reset(&mut self) {
+    pub fn reset_ppu(&mut self) {
         self.frame = 0;
-        self.cycle = 340;
-        self.scanline = 240;
+        self.cycle = 0;
+        self.scanline = 0;
         self.reg.write_ppu_ctrl(0);
         self.reg.write_ppu_mask(0);
         self.reg.write_oam_addr(0);
@@ -139,28 +133,43 @@ impl Ppu {
     // TODO See link below for details on each registry and bit values
     // https://wiki.nesdev.com/w/index.php/PPU_registers#PPUSTATUS
 
+    pub fn draw_pixel(&mut self) {
+        // for (i, byte) in self.nametable {
+
+        //}
+    }
     pub fn step(&mut self) {
-        // TODO When a read to PPU space happens, PPU registers need to change.
-        // eprintln!("Cycle:{:x}", self.cycle);
-        self.increment();
-        if self.cycle >= SCANLINE_CYCLES { // X coordinate
+
+        if self.cycle >= SCANLINE_CYCLES { // 341 cycles (X coordinate)
             self.cycle = 0;
             self.scanline += 1;
-            if self.scanline >= SCANLINE_FRAMES { // Y Coordinate
+           if self.scanline >= SCANLINE_FRAMES { // 261 cycles (Y Coordinate)
                 self.scanline -= 1;
                 self.frame_complete = true;
+
             }
+
         }
         // If our scanline has reached the VBLANK area (241 - 260), and we've at least run one
         // PPU cycle, we're in VBLANK
         if self.scanline == 241 && self.cycle == 1 {
-            self.vblank_nmi = true;
+            self.reg.ppu_status.vblank_start = 1; // Set at dot 1 of line 241 (i.e cycle 1, scanline 241)
+            self.vblank = true;
+            self.nmi_occurred = true;
+            eprintln!("VBLANK enabled. Scanline:{}, PPU Cycle:{}", self.scanline, self.cycle);
+        } else if self.scanline == 261 && self.reg.ppu_status.sprite_zero_hit  != 0 {
+            self.vblank = false;
+            self.nmi_occurred = false;
         }
         if self.scanline == 1 && self.cycle == 1 {
-            self.vblank_nmi = false;
+            self.reg.ppu_status.vblank_start = 0; // Clear at pre-render line
+            self.nmi_occurred = false;
+            self.vblank = false;
             self.reg.ppu_status.sprite_overflow = 0;
             self.reg.ppu_status.sprite_zero_hit = 0;
         }
+        // Debugging: Lets not step any cycles for now
+        self.cycle += 1;
     }
 }
 

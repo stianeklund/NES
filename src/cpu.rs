@@ -11,33 +11,31 @@ use std::cell::RefCell;
 impl MemoryMapper for ExecutionContext {
     // See https://wiki.nesdev.com/w/index.php/CPU_memory_map
 
+    // TODO Clean this up
     fn read8(&self, addr: u16) -> u8 {
         match addr {
-            0x0000..=0x07ff => self.ram.memory[addr as usize],
-            0x0800..=0x1fff => self.ram.memory[addr as usize & 0x07ff],
-            0x2000..=0x2001 => self.ppu.borrow_mut().dummy_read(addr), // Returns 0
+            0x0000 ..= 0x07ff => self.ram.memory[addr as usize],
+            0x0800 ..= 0x1fff => self.ram.memory[addr as usize & 0x07ff],
+            0x2000 ..= 0x2001 => self.ppu.borrow_mut().dummy_read(addr), // Returns 0
             0x2002 => self.ppu.borrow_mut().reg.read_status(),
-            0x2003 => self.ppu.borrow_mut().dummy_read(addr),
+            0x2003 | 0x2005 | 0x2006 => 0, //self.ppu.borrow_mut().dummy_read(addr),
             0x2004 => self.ppu.borrow_mut().reg.read_oam_data(),
-            0x2005 => self.ppu.borrow_mut().dummy_read(addr),
-            0x2006 => 0, // Hack writing to PPUAADR is not allowed // self.ppu.borrow_mut().dummy_read(addr),
             0x2007 => self.ppu.borrow_mut().reg.read_ppu_data(),
-            0x2008..=0x3fff => self.ppu.borrow_mut().read_ppu_reg(addr % 2),
-            0x4000..=0x4013 => self.apu.read8(addr),
+            0x2008 ..= 0x3fff => self.ppu.borrow_mut().read_ppu_reg(addr % 2),
+            0x4000 ..= 0x4013 => self.apu.read8(addr),
             0x4016 => 0, // Controller input
-            0x4018..=0x401f => 0, //  unimplemented!("Read to CPU Test space. Address:{:04x}", addr),
-            0x4020..=0x5fff => 0, // unimplemented!("Read to expansion rom. Address:{:04x}", addr),
-            // $6000-$7FFF = Battery Backed Save or Work RAM
-            0x8000..=0xffff => {
+            0x4018 ..= 0x401f => 0, //  unimplemented!("Read to CPU Test space. Address:{:04x}", addr),
+            0x4020 ..= 0x5fff => 0, // unimplemented!("Read to expansion rom. Address:{:04x}", addr),
+            0x8000 ..= 0xffff => {
                 // This support NROM mapping only
-                let mask_amount = if self.cart.header.prg_rom_page_size == 1 { 0x3fff } else { 0x7fff };
+                let mask_amount = if self.cart.header.prg_rom_page_size == 1 {
+                    0x3fff }
+                else {
+                    0x7fff
+                };
                 self.cart.prg[addr as usize & mask_amount]
             }
-            _ => { 0
-                /* unimplemented!("Read to ${:04x} by {}. Not implemented or not supported",
-                               addr,
-                               Instruction::short_mnemonic(self.cpu.opcode)); */
-            }
+            _ => { 0 }
         }
     }
     fn read16(&self, addr: u16) -> u16 {
@@ -52,15 +50,16 @@ impl MemoryMapper for ExecutionContext {
             // providing 2 nametables with a mirroring configuration controlled by the cartridge,
             // but it can be partly or fully remapped to RAM on the cartridge,
             // allowing up to 4 simultaneous nametables.
-            0x2000..=0x2007 => self.ppu.borrow_mut().write_ppu_reg(addr,byte),
-            0x2008..=0x3fff => self.ppu.borrow_mut().write_ppu_reg(addr % 8, byte),
-            0x4000..=0x4013 => self.apu.write8(addr, byte),
-            0x4015..=0x4017 => eprintln!("Writing to non implemented controller ports"),
-            0x6000..=0x7fff => self.ram.sram[addr as usize] = byte,
+            0x2000 ..= 0x2007 => self.ppu.borrow_mut().write_ppu_reg(addr,byte),
+            0x2008 ..= 0x3fff => self.ppu.borrow_mut().write_ppu_reg(addr % 8, byte),
+            0x4000 ..= 0x4013 => self.apu.write8(addr, byte),
+            0x4015 ..= 0x4017 => eprintln!("Writing:0x{:x} to non implemented controller ports:{:x}", byte, addr),
+            0x4014 => self.ppu.borrow_mut().write_ppu_reg(addr, byte),
+            // 0x6000..=0x7fff => self.ram.sram[addr as usize] = byte,
             // Some tests store ASCII characters in SRAM. Output as characters when writing to SRAM
             // println!("Status: {:04x}", self.ram.sram[0x6000]);
             0x8000 ..= 0xffff => self.cart.prg[addr as usize & 0x3fff] = byte,
-            _ => eprintln!("Trying to write to memory address {:04x}", addr),
+            _ => eprintln!("Trying to write to memory address: ${:04x}", addr),
         };
         if self.debug {
             //Print known address names
@@ -141,7 +140,7 @@ pub struct Cpu {
     flags: StatusRegister,
     pub cycles: u16,
     pub opcode: u8,
-    p: u8,
+    pub(crate) p: u8,
 }
 impl Cpu {
     pub fn new() -> Self {
@@ -184,6 +183,14 @@ impl ExecutionContext {
             debug: false,
             }
     }
+    pub fn log(&self) {
+        info!("{:04X}  {:02X} {:02X}     {} A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X} PPU:{} CYC:{}",
+              self.cpu.reg.pc, self.read8(self.cpu.reg.pc), // Addr
+              self.read8(self.cpu.reg.pc + 1),  // Operand
+              Instruction::short_mnemonic(self.read8(self.cpu.reg.pc)),
+              self.cpu.reg.a, self.cpu.reg.x, self.cpu.reg.y,
+              self.cpu.p, self.cpu.reg.sp, self.ppu.borrow().cycle, self.cpu.cycles);
+    }
     // Helper functions for incrementing and decrementing PC register and cycle count.
     // fn adv_pc(&mut self, amount: u16) { self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(amount); }
     fn adv_pc(&mut self, offset: u16) {
@@ -221,16 +228,6 @@ impl ExecutionContext {
         AddressMode {
             address,
             data: self.read8(address),
-            byte_length: 2,
-            cycle_length: 2
-        }
-    }
-    // TODO Remove? This isn't a real mode
-    fn imm16(&self) -> AddressMode<u16> {
-        let address = self.cpu.reg.pc + 1;
-        AddressMode{
-            address,
-            data: self.read16(address),
             byte_length: 2,
             cycle_length: 2
         }
@@ -341,7 +338,7 @@ impl ExecutionContext {
         self.cpu.opcode = opcode as u8;
         self.cpu.p = self.get_status_flags();
         // Make debug printing look like Nintendulator
-        if !self.debug {
+        if self.debug {
             info!("{:04X}  {:02X} {:02X}     {} A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X}",
                   self.cpu.reg.pc, opcode, // Addr
                   self.read8(self.cpu.reg.pc + 1),  // Operand
@@ -583,17 +580,15 @@ impl ExecutionContext {
     }
     // Branch if Carry Set
     fn bcs(&mut self, offset: AddressMode <u16>) -> AddressMode<u16> {
-        let data = offset.data;
-        let v = offset;
         if self.cpu.flags.carry {
-            self.adv_pc(data); // add offset to pc
+            self.adv_pc((offset.data as i8) as u16);
         }
         self.check_branch(offset);
         offset
     }
     fn bcc(&mut self, offset: AddressMode <u16>) -> AddressMode<u16> {
         if !(self.cpu.flags.carry) {
-            self.adv_pc(offset.data);
+            self.adv_pc((offset.data as i8) as u16);
         }
         self.check_branch(offset);
         offset
@@ -601,8 +596,7 @@ impl ExecutionContext {
     // Branch on Equal
     fn beq(&mut self, offset: AddressMode <u16>) -> AddressMode<u16> {
         if self.cpu.flags.zero {
-            // eprintln!("offset:{:x}", offset);
-            self.adv_pc(offset.data);
+            self.adv_pc((offset.data as i8) as u16);
         }
         self.check_branch(offset);
         offset
@@ -618,7 +612,7 @@ impl ExecutionContext {
     // Branch if Minus
     fn bmi(&mut self, offset: AddressMode <u16>) -> AddressMode<u16> {
         if self.cpu.flags.negative {
-            self.adv_pc(offset.data);
+            self.adv_pc((offset.data as i8) as u16);
         }
         self.check_branch(offset);
         offset
@@ -626,14 +620,14 @@ impl ExecutionContext {
     // Branch on Plus (if positive)
     fn bpl(&mut self, offset: AddressMode <u16>) -> AddressMode<u16> {
         if !self.cpu.flags.negative {
-            self.adv_pc(offset.data);
+            self.adv_pc((offset.data as i8) as u16);
         }
         self.check_branch(offset);
         offset
     }
     fn bne(&mut self, offset: AddressMode <u16>) -> AddressMode<u16> {
         if !self.cpu.flags.zero {
-            self.adv_pc(offset.data);
+            self.adv_pc((offset.data as i8) as u16);
         }
         // TODO Double check cycles
         // Have we crossed a boundary?
@@ -643,7 +637,7 @@ impl ExecutionContext {
     // Branch on overflow clear
     fn bvc(&mut self, offset: AddressMode <u16>) -> AddressMode<u16> {
         if !self.cpu.flags.overflow {
-            self.adv_pc(offset.data);
+            self.adv_pc((offset.data as i8) as u16);
         }
         self.check_branch(offset);
         offset
@@ -1078,17 +1072,13 @@ impl ExecutionContext {
     pub fn nmi(&mut self) {
         let flags = self.get_status_flags();
         self.push_word(self.cpu.reg.pc);
-        // self.push_word(self.cpu.reg.pc);
         self.push_byte(flags);
         // NMI vector
         self.cpu.reg.pc = self.read16(0xfffa);
     }
     // Reset CPU to initial power up state
-    pub fn reset(&mut self) {
-        // TODO PPU reset
-        // Read reset vector
+    pub fn reset_cpu(&mut self) {
         self.cpu.reg.pc = self.read16(0xfffc);
-        // self.cpu.reg.pc = (self.read8(0xfffc) as u16) << 8 | (self.read8(0xfffd) as u16);
         self.cpu.reg.sp = 0xfd;
         self.cpu.flags.carry = false;
         self.cpu.flags.zero = false;

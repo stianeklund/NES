@@ -19,9 +19,10 @@ use std::io::{self, Read};
 use std::fs::File;
 use interconnect::{Interconnect, MemoryMapper};
 use cpu::ExecutionContext;
+use opcode::Instruction;
 use flexi_logger::{Logger, LogTarget, opt_format, default_format};
 use log::{info, error, warn, debug};
-use std::borrow::BorrowMut;
+use std::borrow::{BorrowMut, Borrow};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -44,7 +45,8 @@ fn main() {
     debug!("Loaded rom:{:?}", path.file_name().unwrap());
 
     let mut ctx = ExecutionContext::new();
-    ctx.reset();
+    ctx.reset_cpu();
+    ctx.ppu.get_mut().reset_ppu();
     ctx.cart.load_rom(&f);
 
     // For debugging purposes
@@ -53,34 +55,47 @@ fn main() {
     println!("NMI Vector:   {:04x}", ctx.read16(0xfffa));
     println!("IRQ Vector:   {:04x}", ctx.read16(0xfffe));
     ctx.cpu.reg.pc = ctx.read16(0xfffc);
+
     // For nestest only
     // ctx.cpu.reg.pc = 0xc000;
+    // let err1 = ctx.read8(0x02);
+    // let err2 = ctx.read8(0x03);
 
-    // let test_output = ctx.cart.read8(0x6000);
-    let err1 = ctx.read8(0x02);
-    let err2 = ctx.read8(0x03);
     loop {
         let step: bool = false;
         if step {
             io::stdin().read_line(&mut String::new()).unwrap();
         }
-        ctx.decode();
-        ctx.ppu.borrow_mut().step();
-        if ctx.ppu.borrow_mut().vblank_nmi {
-            eprintln!("NMI enabled");
-        }
-        if ctx.ppu.borrow_mut().vblank_nmi {
-            ctx.nmi();
-            ctx.ppu.borrow_mut().vblank_nmi = false;
-            eprintln!("Executing NMI");
-        }
-        /*if test_output != 0 {
-            eprintln!("Test output:{:x}", test_output);
-        }*/
-        if err1 | err2 != 0 {
-            eprintln!("{:x} {:x}", ctx.read8(0x02), ctx.read8(0x03));
-        }
 
+        // run(ctx.borrow_mut());
+        log(ctx.borrow());
+        ctx.decode();
 
     }
+}
+
+fn run(ctx: &mut ExecutionContext) {
+    let mut cycle =0;
+    if ctx.ppu.borrow_mut().nmi_occurred {
+            eprintln!("NMI enabled");
+        }
+        if ctx.ppu.borrow().nmi_occurred {
+            ctx.ppu.borrow_mut().vblank = false;
+            ctx.ppu.borrow_mut().nmi_occurred = false;
+            ctx.nmi();
+            eprintln!("Executing NMI, turning vblank & NMI flags off");
+        }
+        ctx.ppu.borrow_mut().step();
+    if cycle % 3 == 0 {
+        ctx.decode();
+    }
+    cycle += 1;
+}
+fn log(ctx: &ExecutionContext) {
+    info!("{:04X}  {:02X} {:02X}     {} A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X} PPU:{} CYC:{}",
+          ctx.cpu.reg.pc, ctx.read8(ctx.cpu.reg.pc), // Addr
+          ctx.read8(ctx.cpu.reg.pc + 1),  // Operand
+          Instruction::short_mnemonic(ctx.read8(ctx.cpu.reg.pc)),
+          ctx.cpu.reg.a, ctx.cpu.reg.x, ctx.cpu.reg.y,
+          ctx.cpu.p, ctx.cpu.reg.sp, ctx.ppu.borrow().cycle, ctx.cpu.cycles);
 }
