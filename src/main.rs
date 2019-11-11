@@ -55,20 +55,19 @@ fn main() {
     // For nestest only
     // ctx.cpu.reg.pc = 0xc000;
 
-    let test_output = ctx.read8(0x6000);
+    // let test_output = ctx.cart.read8(0x6000);
     let err1 = ctx.read8(0x02);
     let err2 = ctx.read8(0x03);
-
     loop {
         let step: bool = false;
         if step {
             io::stdin().read_line(&mut String::new()).unwrap();
         }
         ctx.decode();
-        ctx.ppu.step();
-        if test_output != 0 {
+        ctx.ppu.borrow_mut().step();
+        /*if test_output != 0 {
             eprintln!("Test output:{:x}", test_output);
-        }
+        }*/
         if err1 | err2 != 0 {
             eprintln!("{:x} {:x}", ctx.read8(0x02), ctx.read8(0x03));
         }

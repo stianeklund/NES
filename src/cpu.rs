@@ -6,31 +6,36 @@ use crate::ppu::{Ppu, FrameBuffer};
 use crate::apu::Apu;
 use log::{info, warn, debug, error};
 use std::fmt::{LowerHex, Formatter, Error};
+use std::cell::RefCell;
 
 impl MemoryMapper for ExecutionContext {
+    // See https://wiki.nesdev.com/w/index.php/CPU_memory_map
+
     fn read8(&self, addr: u16) -> u8 {
-        // self.adv_cycles(1);
-        // See https://wiki.nesdev.com/w/index.php/CPU_memory_map
         match addr {
-            0x0000 ..= 0x07ff => self.ram.memory[addr as usize],
-            0x0800 ..= 0x1fff => self.ram.memory[addr as usize & 0x07ff],
-            0x2000 ..= 0x2001 => self.ppu.dummy_read(addr),
-            0x2002 ..= 0x2007 => self.ppu.read_ppu(addr),
-            0x2008 ..= 0x3fff => self.ppu.read_ppu(addr % 8),
-            0x4000 ..= 0x4017 => self.apu.read8(addr),
-            0x4018 ..= 0x401f => unimplemented!("Read to CPU Test space. Address:{:04x}", addr),
-            0x4020 ..= 0x5fff => unimplemented!("Read to expansion rom. Address:{:04x}", addr),
+            0x0000..=0x07ff => self.ram.memory[addr as usize],
+            0x0800..=0x1fff => self.ram.memory[addr as usize & 0x07ff],
+            0x2000..=0x2001 => self.ppu.borrow_mut().dummy_read(addr), // Returns 0
+            0x2002..=0x2007 => self.ppu.borrow_mut().read_ppu_reg(addr),
+            0x2008..=0x3fff => self.ppu.borrow_mut().read_ppu_reg(addr % 8),
+            0x4000..=0x4017 => self.apu.read8(addr),
+            0x4018..=0x401f => 0, //  unimplemented!("Read to CPU Test space. Address:{:04x}", addr),
+            0x4020..=0x5fff => 0, // unimplemented!("Read to expansion rom. Address:{:04x}", addr),
             // $6000-$7FFF = Battery Backed Save or Work RAM
-            0x6000 ..= 0x7fff => self.ram.sram[addr as usize] as u8,
-            0x8000 ..= 0xffff => {
+            0x8000..=0xffff => {
                 // This support NROM mapping only
-                let mask_amount = if self.cart.header.prg_rom_page_size != 1 { 0x7fff } else { 0x3fff };
+                let mask_amount = if self.cart.header.prg_rom_page_size == 1 { 0x3fff } else { 0x7fff };
                 self.cart.prg[addr as usize & mask_amount]
             }
-            _ => unimplemented!("Read to ${:04x} by {}. Not implemented or not supported",
-                                addr,
-                                Instruction::short_mnemonic(self.cpu.opcode)),
+            _ => { 0
+                /* unimplemented!("Read to ${:04x} by {}. Not implemented or not supported",
+                               addr,
+                               Instruction::short_mnemonic(self.cpu.opcode)); */
+            }
         }
+    }
+    fn read16(&self, addr: u16) -> u16 {
+        u16::from_le_bytes([self.read8(addr), self.read8(addr + 1)])
     }
     fn write8(&mut self, addr: u16, byte: u8) {
         match addr {
@@ -41,8 +46,8 @@ impl MemoryMapper for ExecutionContext {
             // providing 2 nametables with a mirroring configuration controlled by the cartridge,
             // but it can be partly or fully remapped to RAM on the cartridge,
             // allowing up to 4 simultaneous nametables.
-            0x2000 ..= 0x2007 => self.ppu.write_ppu(addr,byte),
-            0x2008 ..= 0x3fff => self.ppu.write_ppu(addr,byte),
+            0x2000 ..= 0x2007 => self.ppu.borrow_mut().write_ppu_reg(addr,byte),
+            0x2008 ..= 0x3fff => self.ppu.borrow_mut().write_ppu_reg(addr % 8, byte),
             0x4000 ..= 0x4017 => self.apu.write8(addr, byte),
             0x6000 ..= 0x7fff => { self.ram.sram[addr as usize] = byte; },
             // Some tests store ASCII characters in SRAM. Output as characters when writing to SRAM
@@ -132,9 +137,9 @@ pub struct Cpu {
     p: u8,
 }
 impl Cpu {
-    pub fn default() -> Self {
+    pub fn new() -> Self {
         Self {
-            reg: Default::default(),
+            reg: Registers::default(),
             flags: StatusRegister {
                 negative: false,
                 overflow: false,
@@ -157,20 +162,20 @@ pub struct ExecutionContext {
     pub cpu: Cpu,
     pub cart: Cartridge,
     pub ram: Ram,
-    pub ppu: Ppu,
+    pub ppu: RefCell<Ppu>,
     pub apu: Apu,
     debug: bool,
 }
 impl ExecutionContext {
     pub fn new() -> Self {
         Self {
-            cpu: Cpu::default(),
-            cart: Cartridge::default(),
-            ram: Ram::default(),
-            ppu: Ppu::new(),
+            cpu: Cpu::new(),
+            cart: Cartridge::new(),
+            ram: Ram::new(),
+            ppu: RefCell::new(Ppu::new()),
             apu: Apu::default(),
             debug: false,
-        }
+            }
     }
     // Helper functions for incrementing and decrementing PC register and cycle count.
     // fn adv_pc(&mut self, amount: u16) { self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(amount); }
@@ -224,18 +229,16 @@ impl ExecutionContext {
         }
     }
     fn abs(&self) -> AddressMode<u16> {
-        let pc = self.cpu.reg.pc + 1;
-        let address = self.read16(pc);
         AddressMode{
-            address,
-            data: u16::from(self.read16(address) as u8),
+            address: self.read16(self.cpu.reg.pc + 1),
+            data: u16::from(self.read16(self.read16(self.cpu.reg.pc + 1)) as u8),
             byte_length: 3,
             cycle_length: 4
         }
     }
     fn abs_x(&self) -> AddressMode<u16> {
         let pc = self.read16(self.cpu.reg.pc + 1);
-        let address = pc + self.cpu.reg.x as u16;
+        let address = pc + u16::from(self.cpu.reg.x);
         AddressMode {
             address,
             data: u16::from(self.read16(address) as u8),
@@ -298,7 +301,7 @@ impl ExecutionContext {
         let address = (hi as u16) << 8 | lo as u16;
         AddressMode {
             address,
-            data: self.read8(address) as u16,
+            data: u16::from(self.read8(address)),
             byte_length: 3,
             cycle_length: 5
         }
@@ -905,10 +908,7 @@ impl ExecutionContext {
         self.cpu.flags.zero = result == 0;
         value
     }
-    fn sta(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> {
-        self.write8(mode.address, self.cpu.reg.a);
-        mode
-    }
+    fn sta(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> { self.write8(mode.address, self.cpu.reg.a); mode }
     fn sty(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> { self.write8(mode.address, self.cpu.reg.y); mode }
     fn stx(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> { self.write8(mode.address, self.cpu.reg.x); mode }
     // Transfer Accumulator to X

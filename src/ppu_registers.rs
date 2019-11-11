@@ -79,16 +79,17 @@ impl LowerHex for Registers {
 
 impl Registers {
     pub fn write_ppu_ctrl(&mut self, value: u8)  {
-        self.ppu_ctrl.base_nametable_addr = (value >> 0) & 1;
+        self.ppu_ctrl.base_nametable_addr = value & 3;
         self.ppu_ctrl.vram_addr_increment = (value >> 2) & 1;
         self.ppu_ctrl.sprite_pattern_table = (value >> 3) & 1;
         self.ppu_ctrl.backgrnd_pattern_table_addr = (value >> 4) & 1;
         self.ppu_ctrl.sprite_size = (value >> 5) & 1;
         self.ppu_ctrl.master_slave_select = (value >> 6) & 1;
         self.ppu_ctrl.nmi_result = (value >> 7) & 1;
+        // eprintln!("PPUCTRL:{:x?}", self.ppu_ctrl);
     }
     pub fn write_ppu_mask(&mut self, value: u8) {
-        self.ppu_mask.greyscale = (value >> 0) & 1;
+        self.ppu_mask.greyscale = value & 1;
         self.ppu_mask.show_left_background = (value >> 1) & 1;
         self.ppu_mask.show_left_sprites = (value >> 2) & 1;
         self.ppu_mask.show_background = (value >> 3) & 1;
@@ -102,7 +103,7 @@ impl Registers {
         result |= self.ppu_status.sprite_overflow << 5;
         result |= self.ppu_status.sprite_zero_hit << 6;
         result |= self.ppu_status.vblank_start << 7;
-        result as u8
+        result
     }
     pub fn write_oam_addr(&mut self, value: u8) {
         self.oam_addr.oam_addr = value;
@@ -126,9 +127,9 @@ impl Registers {
     pub fn write_ppu_data(&mut self, value: u8) {
         self.ppu_data.data = value;
     }
-    pub fn read_ppu_data(&self) -> u8 {
+    pub fn read_ppu_data(&mut self) -> u8 {
+        self.ppu_data.data += 1; // Increment PPUADDR's data on reads
         self.ppu_data.data
-        // TODO Increment here?
     }
     pub fn write_oam_dma(&mut self, value:u8) {
         self.oam_dma.data = value;

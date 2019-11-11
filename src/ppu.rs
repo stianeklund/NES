@@ -7,16 +7,20 @@ use crate::interconnect::{MemoryMapper, Interconnect};
 use crate::rom::Cartridge;
 use crate::ppu_registers::*;
 
-pub const WIDTH: u32 = 240;
-pub const HEIGHT: u32 = 256;
-pub const PALLET_SIZE: usize= 0x20;
-pub const NAMETABLE_SIZE: usize = 0x800;
+const WIDTH: u32 = 240;
+const HEIGHT: u32 = 256;
+const PALLET_SIZE: usize= 0x20;
+const NAMETABLE_SIZE: usize = 0x800;
+const SCANLINE_CYCLES: usize = 341;
+const SCANLINE_FRAMES: usize = 261;
+
 
 pub struct Ppu {
     pub frame: u8, // frame counter
-    pub cycle: u16, // 0 - 340?
+    pub cycle: usize, // 0 - 340?
     pub addr: u16,
-    pub scanline: u8,
+    scanline: usize,
+    pub frame_complete: bool,
 
     // Interrupt Flags
     pub vblank_nmi: bool,
@@ -30,6 +34,7 @@ pub struct Ppu {
     pub attribute_table: Vec<u8>,
     pub buffer: Vec<u16>,
     pub vram: Vec<u16>,
+    pub cart: Cartridge,
 
 }
 
@@ -52,17 +57,18 @@ pub struct FrameBuffer {
     ).unwrap();
    FrameBuffer {
        ppu: Ppu::new(),
-       buffer: Box::new([0u16; 258 * 240]),
+       buffer: Box::new([0_u16; 258 * 240]),
        window
    }
 }
 impl Ppu {
     pub fn new() -> Self {
-        Ppu {
+        Self {
             frame: 0,
             cycle: 0,
             addr: 0,
             scanline: 0,
+            frame_complete: false,
 
             vblank_nmi: false,
             nmi: false,
@@ -74,19 +80,15 @@ impl Ppu {
             attribute_table: vec![],
             buffer: vec![HEIGHT as u16 * WIDTH as u16],
             vram: vec![0; 0x2000],
+            cart: Cartridge::new(),
         }
     }
-    pub fn write_ppu(&mut self, addr: u16, byte: u8) {
+    pub fn write_ppu_reg(&mut self, addr: u16, byte: u8) {
         self.addr = addr;
         match addr {
             0x2000 => {
                 self.reg.write_ppu_ctrl(byte);
-                // self.reg.ppu_ctrl = byte;
-                // self.vblank_nmi = (byte >> 7) & 1 == 0;
-                // self.reg.ppu_status.value |= 0x80;
-                // if self.reg.ppu_ctrl.value >> 3 & 0 != 0 {
-                // self.nmi = true;
-                // }
+                self.vblank_nmi = (byte >> 7) & 1 == 0;
             },
             0x2001 => self.reg.write_ppu_mask(byte),
             0x2002 => panic!("Writes to PPUSTATUS is not allowed"),
@@ -103,21 +105,29 @@ impl Ppu {
             0x3f00 ..= 0x3fff => self.nametable[addr as usize] = byte,*/
             _ => panic!("PPU Write: Unrecognized address ${:04x}", addr)
         };
-        eprintln!("PPU writing 0x{:x} to ${:04x}", byte, addr);
+        eprintln!("PPU Write:0x{:x} to ${:04x}", byte, addr);
     }
-    pub fn read_ppu(&self, addr: u16) -> u8 {
-        match addr {
+    pub fn read_ppu_reg(&mut self, addr: u16) -> u8 {
+        let result = match addr {
             0x2002 => self.reg.read_status(),
             0x2003 => self.reg.read_oam_addr(),
             0x2004 => self.reg.read_oam_data(),
             0x2007 => self.reg.read_ppu_data(),
             _ => panic!("Attempting to read PPU with address:${:04x}", addr)
-        }
+        };
+        eprintln!("PPU Read:${:04x}, returned:{:02x}", addr, result);
+        result
     }
-    pub fn dummy_read(&self, addr: u16) -> u8 {
+    pub fn dummy_read(&mut self, _addr: u16) -> u8 {
         // Reads to `$2000` are illegal, just do a dummy read
-        // TODO increment cycle somehow here
-        0x00
+        self.increment();
+        self.increment();
+        // eprintln!("We've incremented the PPU cycle, old:{:x}, new:{:x}", old, self.cycle);
+        // Return 0 for now
+        0_u8
+    }
+    pub fn increment(&mut self) {
+        self.cycle +=1;
     }
 
     // PPU Reset
@@ -134,20 +144,26 @@ impl Ppu {
 
     pub fn step(&mut self) {
         // TODO When a read to PPU space happens, PPU registers need to change.
-        self.cycle += 1;
-        // eprintln!("PPU addr: ${:04x}", self.addr);
-        // self.reg.ppu_status.value |= 0x80;
-        // self.nmi = true;
-        // TODO check if this is correct
-        if self.vblank_nmi && self.reg.ppu_ctrl.nmi_result & !0x80 != 0 {
+        // eprintln!("Cycle:{:x}", self.cycle);
+        self.increment();
+        if self.cycle >= SCANLINE_CYCLES { // X coordinate
+            self.cycle = 0;
+            self.scanline += 1;
+            if self.scanline >= SCANLINE_FRAMES { // Y Coordinate
+                self.scanline -= 1;
+                self.frame_complete = true;
+            }
+        }
+        // If our scanline has reached the VBLANK area (241 - 260), and we've at least run one
+        // PPU cycle, we're in VBLANK
+        if self.scanline == 241 && self.cycle == 1 {
             self.vblank_nmi = true;
         }
-
-        // let _sprite0_hit = self.reg.ppu_status & 0x40;
-        // Reads to the status register clears bit 7
-        // self.reg.ppu_status = (self.reg.ppu_status & !0x80);
-        // self.reg.ppu_status
-        // self.reg.ppu_status = self.reg.ppu_status.value;
+        if self.scanline == 1 && self.cycle == 1 {
+            self.vblank_nmi = false;
+            self.reg.ppu_status.sprite_overflow = 0;
+            self.reg.ppu_status.sprite_zero_hit = 0;
+        }
     }
 }
 
@@ -156,10 +172,10 @@ impl MemoryMapper for Ppu {
     fn read8(&self, addr: u16) -> u8 {
         println!("Internal PPU Read ${:04x}", addr);
         match addr {
-            0 ..= 0x0fff => self.pattern_tables[addr as usize],
+            0 ..= 0x0fff =>  self.pattern_tables[addr as usize],
             0x1000 ..= 0x1fff => self.pattern_tables[addr as usize],
             0x2000 ..= 0x23ff => self.nametable[addr as usize],
-            0x2400 ..= 0x27ff => self.nametable[addr as usize & 02],
+            0x2400 ..= 0x27ff => self.nametable[addr as usize % 8],
             0x2800 ..= 0x2bff => self.nametable[addr as usize],
             0x2c00 ..= 0x2fff => self.nametable[addr as usize],
             0x3000 ..= 0x3eff => self.nametable[addr as usize & 0x2eff],

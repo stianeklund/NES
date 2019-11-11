@@ -41,9 +41,9 @@ pub struct RomHeader {
     pub zero: [u8; 5],
 }
 
-impl Default for RomHeader {
-    fn default() -> Self {
-        RomHeader {
+impl RomHeader {
+    fn new() -> Self {
+        Self {
             magic: [0; 4],
             sram: 0,
             prg_rom_page_size: 0x4000,
@@ -74,10 +74,10 @@ impl MemoryMapper for Cartridge {
     fn read8(&self, addr: u16) -> u8 {
         println!("Cart read: ${:04x}", addr);
         match addr {
-            0 ..= 0x07ff => panic!("Trying to read RAM from Cartridge"),
-            0x0800 ..= 0x1fff => panic!("Trying to read RAM Mirror from Cartridge"),
-            0x2000 ..= 0x3fff => panic!("Trying to read from PPU registers. Not implemented"),
-            0x8000 ..= 0xffff => self.prg[addr as usize & 0x3fff],
+            0..=0x07ff => panic!("Trying to read RAM from Cartridge"),
+            0x0800..=0x1fff => panic!("Trying to read RAM Mirror from Cartridge"),
+            0x2000..=0x3fff => panic!("Trying to read from PPU registers. Not implemented"),
+            0x8000..=0xffff => self.prg[addr as usize & 0x3fff],
             _ => panic!("Unrecognized read address: {:04x}", addr)
         }
     }
@@ -107,9 +107,9 @@ pub struct Cartridge {
 }
 
 impl Cartridge {
-    pub fn default() -> Self {
+    pub fn new() -> Self {
         Cartridge {
-            header: RomHeader::default(),
+            header: RomHeader::new(),
             prg: vec![0; 4 * PRG_ROM_BANK_SIZE],
             chr: vec![0; 2 * CHR_ROM_BANK_SIZE],
             rom: vec![0; 0x85_000],

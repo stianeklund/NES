@@ -1,11 +1,10 @@
 use crate::memory::Ram;
-use crate::ppu::Ppu;
 use crate::rom::Cartridge;
-use crate::cpu::{ExecutionContext, Registers};
+use crate::cpu::Registers;
 
 
 pub trait MemoryMapper {
-    fn read8(&self, addr: u16) -> u8 ;
+    fn read8(&self, addr: u16) -> u8;
     fn read16(&self, addr: u16) -> u16 {
         u16::from_le_bytes([self.read8(addr), self.read8(addr + 1)])
     }
@@ -61,8 +60,8 @@ impl Interconnect {
     pub fn default() -> Box<Interconnect> {
 
         Box::new(Interconnect {
-            cart: Cartridge::default(),
-            ram: Ram::default(),
+            cart: Cartridge::new(),
+            ram: Ram::new(),
             registers: Registers::default(),
         })
     }
