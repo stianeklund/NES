@@ -15,13 +15,13 @@ impl MemoryMapper for ExecutionContext {
     fn read8(&self, addr: u16) -> u8 {
         match addr {
             0x0000 ..= 0x07ff => self.ram.memory[addr as usize],
-            0x0800 ..= 0x1fff => self.ram.memory[addr as usize & 0x07ff],
+            0x0800 ..= 0x1fff => self.ram.memory[addr as usize % 8],
             0x2000 ..= 0x2001 => self.ppu.borrow_mut().dummy_read(addr), // Returns 0
             0x2002 => self.ppu.borrow_mut().reg.read_status(),
             0x2003 | 0x2005 | 0x2006 => 0, //self.ppu.borrow_mut().dummy_read(addr),
             0x2004 => self.ppu.borrow_mut().reg.read_oam_data(),
             0x2007 => self.ppu.borrow_mut().reg.read_ppu_data(),
-            0x2008 ..= 0x3fff => self.ppu.borrow_mut().read_ppu_reg(addr % 2),
+            0x2008 ..= 0x3fff => self.ppu.borrow_mut().read_ppu_reg(0x2000 + (addr & 0b111)),
             0x4000 ..= 0x4013 => self.apu.read8(addr),
             0x4016 => 0, // Controller input
             0x4018 ..= 0x401f => 0, //  unimplemented!("Read to CPU Test space. Address:{:04x}", addr),
@@ -51,16 +51,19 @@ impl MemoryMapper for ExecutionContext {
             // but it can be partly or fully remapped to RAM on the cartridge,
             // allowing up to 4 simultaneous nametables.
             0x2000 ..= 0x2007 => self.ppu.borrow_mut().write_ppu_reg(addr,byte),
-            0x2008 ..= 0x3fff => self.ppu.borrow_mut().write_ppu_reg(addr % 8, byte),
+            0x2008 ..= 0x3fff => self.ppu.borrow_mut().write_ppu_reg(0x2000 + (addr & 0b111), byte),
             0x4000 ..= 0x4013 => self.apu.write8(addr, byte),
             0x4015 ..= 0x4017 => eprintln!("Writing:0x{:x} to non implemented controller ports:{:x}", byte, addr),
             0x4014 => self.ppu.borrow_mut().write_ppu_reg(addr, byte),
             // 0x6000..=0x7fff => self.ram.sram[addr as usize] = byte,
             // Some tests store ASCII characters in SRAM. Output as characters when writing to SRAM
             // println!("Status: {:04x}", self.ram.sram[0x6000]);
-            0x8000 ..= 0xffff => self.cart.prg[addr as usize & 0x3fff] = byte,
+            0x8000 ..= 0xffff => {
+                eprintln!("Attempting to write to PRG ROM. Address:${:04x} Byte:{:02x}", addr, byte);
+                // self.cart.prg[addr as usize & 0x3fff] = byte;
+            }
             _ => eprintln!("Trying to write to memory address: ${:04x}", addr),
-        };
+        }
         if self.debug {
             //Print known address names
             println!("{}", AddressMatch::resolve_addr(byte, addr));
@@ -138,9 +141,9 @@ pub struct Registers {
 pub struct Cpu {
     pub reg: Registers,
     flags: StatusRegister,
-    pub cycles: u16,
+    pub cycles: usize,
     pub opcode: u8,
-    pub(crate) p: u8,
+    pub p: u8,
 }
 impl Cpu {
     pub fn new() -> Self {
@@ -183,21 +186,14 @@ impl ExecutionContext {
             debug: false,
             }
     }
-    pub fn log(&self) {
-        info!("{:04X}  {:02X} {:02X}     {} A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X} PPU:{} CYC:{}",
-              self.cpu.reg.pc, self.read8(self.cpu.reg.pc), // Addr
-              self.read8(self.cpu.reg.pc + 1),  // Operand
-              Instruction::short_mnemonic(self.read8(self.cpu.reg.pc)),
-              self.cpu.reg.a, self.cpu.reg.x, self.cpu.reg.y,
-              self.cpu.p, self.cpu.reg.sp, self.ppu.borrow().cycle, self.cpu.cycles);
-    }
+
     // Helper functions for incrementing and decrementing PC register and cycle count.
     // fn adv_pc(&mut self, amount: u16) { self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(amount); }
     fn adv_pc(&mut self, offset: u16) {
         self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
     }
     fn adv_cycles(&mut self, amount: u16) {
-       self.cpu.cycles = self.cpu.cycles.wrapping_add(amount);
+       self.cpu.cycles = self.cpu.cycles.wrapping_add(amount as usize);
     }
     fn adv(&mut self, mode: AddressMode<u16>) {
         match self.cpu.opcode {

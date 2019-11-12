@@ -66,11 +66,8 @@ fn main() {
         if step {
             io::stdin().read_line(&mut String::new()).unwrap();
         }
-
-        // run(ctx.borrow_mut());
         log(ctx.borrow());
-        ctx.decode();
-
+        run(ctx.borrow_mut());
     }
 }
 

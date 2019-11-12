@@ -101,11 +101,12 @@ impl Ppu {
             0x3000 ..= 0x3eff => self.nametable[addr as usize & 0x2eff] = byte,
             0x3f00 ..= 0x3fff => self.nametable[addr as usize] = byte,*/
             _ => panic!("PPU Write: Unrecognized address ${:04x}", addr)
-        };
+        }
         eprintln!("PPU Write:0x{:x} to ${:04x}", byte, addr);
     }
     pub fn read_ppu_reg(&mut self, addr: u16) -> u8 {
         let result = match addr {
+            0x2000 ..= 0x2001 => self.dummy_read(addr),
             0x2002 => self.reg.read_status(),
             0x2003 => self.reg.read_oam_addr(),
             0x2004 => self.reg.read_oam_data(),
@@ -116,7 +117,7 @@ impl Ppu {
         result
     }
     pub fn dummy_read(&mut self, _addr: u16) -> u8 {
-        eprintln!("PPU Dummy Read: ${:04x}", _addr);
+        // eprintln!("PPU Dummy Read: ${:04x}", _addr);
         self.cycle += 2;
         0_u8
     }
@@ -133,13 +134,9 @@ impl Ppu {
     // TODO See link below for details on each registry and bit values
     // https://wiki.nesdev.com/w/index.php/PPU_registers#PPUSTATUS
 
-    pub fn draw_pixel(&mut self) {
-        // for (i, byte) in self.nametable {
-
-        //}
-    }
     pub fn step(&mut self) {
 
+        self.cycle += 1;
         if self.cycle >= SCANLINE_CYCLES { // 341 cycles (X coordinate)
             self.cycle = 0;
             self.scanline += 1;
@@ -153,23 +150,26 @@ impl Ppu {
         // If our scanline has reached the VBLANK area (241 - 260), and we've at least run one
         // PPU cycle, we're in VBLANK
         if self.scanline == 241 && self.cycle == 1 {
-            self.reg.ppu_status.vblank_start = 1; // Set at dot 1 of line 241 (i.e cycle 1, scanline 241)
+            self.reg.ppu_status.vblank_start = true; // Set at dot 1 of line 241 (i.e cycle 1, scanline 241)
             self.vblank = true;
-            self.nmi_occurred = true;
-            eprintln!("VBLANK enabled. Scanline:{}, PPU Cycle:{}", self.scanline, self.cycle);
-        } else if self.scanline == 261 && self.reg.ppu_status.sprite_zero_hit  != 0 {
+            // NMI should probably not fire here?
+            // self.nmi_occurred = true;
+
+            if self.reg.ppu_ctrl.nmi_result > 0 {
+                self.nmi_occurred = true;
+                eprintln!("NMI occurred. Scanline:{}, PPU Cycle:{}", self.scanline, self.cycle);
+            }
+        } else if self.scanline == 261 && self.reg.ppu_status.sprite_zero_hit {
             self.vblank = false;
             self.nmi_occurred = false;
         }
         if self.scanline == 1 && self.cycle == 1 {
-            self.reg.ppu_status.vblank_start = 0; // Clear at pre-render line
+            self.reg.ppu_status.vblank_start = false; // Clear at pre-render line
             self.nmi_occurred = false;
             self.vblank = false;
-            self.reg.ppu_status.sprite_overflow = 0;
-            self.reg.ppu_status.sprite_zero_hit = 0;
+            self.reg.ppu_status.sprite_overflow = false;
+            self.reg.ppu_status.sprite_zero_hit = false;
         }
-        // Debugging: Lets not step any cycles for now
-        self.cycle += 1;
     }
 }
 
