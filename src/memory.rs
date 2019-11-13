@@ -1,7 +1,7 @@
 use std::ops::{Index, IndexMut};
 use std::fmt::{UpperHex, LowerHex};
 use std::fmt::{Debug, Formatter, Result};
-use crate::rom::{Cartridge, RomHeader};
+use crate::cartridge::{Cartridge, RomHeader};
 
 
 pub struct Ram {

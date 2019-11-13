@@ -1,5 +1,5 @@
 use crate::memory::Ram;
-use crate::rom::Cartridge;
+use crate::cartridge::Cartridge;
 use crate::cpu::Registers;
 
 

@@ -1,12 +1,11 @@
+use crate::interconnect::MemoryMapper;
+use std::fs::File;
+use std::io::Read;
+use std::io::{Error, Result};
 use std::ops::{Index, IndexMut};
 use std::ops::{Range, RangeTo};
 use std::path::Path;
-use std::io::Read;
-use std::fs::File;
-use std::io::{Result, Error};
 use std::str;
-use crate::memory::Ram;
-use crate::interconnect::MemoryMapper;
 
 /* ******************************************************************************************** */
 // iNES HEADER INFORMATION
@@ -46,12 +45,12 @@ impl RomHeader {
         Self {
             magic: [0; 4],
             sram: 0,
-            prg_rom_page_size: 0x4000,
-            chr_rom_page_size: 0x2000,
+            prg_rom_page_size: 0,
+            chr_rom_page_size: 0,
             flags_6: 0,
             flags_7: 0,
-            prg_ram_page_size: 0x2000,
-            chr_ram_page_size: 0x2000,
+            prg_ram_page_size: 0,
+            chr_ram_page_size: 0,
             flags_9: 0,
             flags_10: 0,
             zero: [0; 5],
@@ -60,12 +59,12 @@ impl RomHeader {
 }
 impl Index<u16> for Cartridge {
     type Output = u8;
-    fn index(&self, index:u16) -> &u8 {
+    fn index(&self, index: u16) -> &u8 {
         &self.prg[index as usize]
     }
 }
 impl IndexMut<u16> for Cartridge {
-    fn index_mut(&mut self, index:u16) -> &mut u8 {
+    fn index_mut(&mut self, index: u16) -> &mut u8 {
         &mut self.prg[index as usize]
     }
 }
@@ -78,7 +77,7 @@ impl MemoryMapper for Cartridge {
             0x0800..=0x1fff => panic!("Trying to read RAM Mirror from Cartridge"),
             0x2000..=0x3fff => panic!("Trying to read from PPU registers. Not implemented"),
             0x8000..=0xffff => self.prg[addr as usize & 0x3fff],
-            _ => panic!("Unrecognized read address: {:04x}", addr)
+            _ => panic!("Unrecognized read address: {:04x}", addr),
         }
     }
     fn read16(&self, addr: u16) -> u16 {
@@ -87,10 +86,10 @@ impl MemoryMapper for Cartridge {
     fn write8(&mut self, addr: u16, byte: u8) {
         println!("Cart write: {:04x} to ${:04x}", byte, addr);
         match addr {
-            0 ..= 0x07ff => self.write8(addr, byte),
-            0x0800 ..= 0x1fff => self.write8(addr, byte),
-            0x2000 ..= 0x3fff => self.write8(addr, byte),
-            0x8000 ..= 0xffff => self.write8(addr, byte),
+            0..=0x07ff => self.write8(addr, byte),
+            0x0800..=0x1fff => self.write8(addr, byte),
+            0x2000..=0x3fff => self.write8(addr, byte),
+            0x8000..=0xffff => self.write8(addr, byte),
             _ => eprintln!("Unable to write to memory address"),
         }
     }
@@ -98,20 +97,19 @@ impl MemoryMapper for Cartridge {
 
 #[derive(Debug)]
 pub struct Cartridge {
-    pub header: RomHeader,      // iNES Header
-    pub prg: Vec<u8>,           // A copy of the games program rom? Why? Is this for mirroring?
-    pub chr: Vec<u8>,           // Copy of the games pattern table ROM or RAM for save states.
-    pub rom: Vec<u8>,           // Temporary copy of ROM contents
-    pub mapper_id: u8           // Mapper ID
-
+    pub header: RomHeader, // iNES Header
+    pub prg: Vec<u8>,      // A copy of the games program rom. First 8kB is CHR rom.
+    pub chr: Vec<u8>,      // Copy of the games pattern table ROM or RAM for save states.
+    pub rom: Vec<u8>,      // Temporary copy of ROM contents
+    pub mapper_id: u8,     // Mapper ID
 }
 
 impl Cartridge {
     pub fn new() -> Self {
-        Cartridge {
+        Self {
             header: RomHeader::new(),
             prg: vec![0; 4 * PRG_ROM_BANK_SIZE],
-            chr: vec![0; 2 * CHR_ROM_BANK_SIZE],
+            chr: vec![0; CHR_ROM_BANK_SIZE],
             rom: vec![0; 0x85_000],
             mapper_id: 0,
         }
@@ -131,12 +129,15 @@ impl Cartridge {
         let mut f = File::open(&path).expect("Couldn't find ROM");
         let mut buf = Vec::new();
 
-
-        f.read_to_end(&mut buf).expect("i/o error, could not read file to end");
+        f.read_to_end(&mut buf)
+            .expect("i/o error, could not read file to end");
         self.rom[16..buf.len()].clone_from_slice(&buf[16..]);
 
-        println!("\nLoaded: {} Size(KB): {:?}", path.to_str().unwrap(),
-                 (buf.len() as f64 * 0.0009765625) as u32);
+        println!(
+            "\nLoaded: {} Size(KB): {:?}",
+            path.to_str().unwrap(),
+            (buf.len() as f64 * 0.000_976_562_5) as u32
+        );
     }
 
     fn validate_header(&mut self, header: &Vec<u8>) -> Result<RomHeader> {
@@ -145,7 +146,9 @@ impl Cartridge {
         self.header.magic = [header[0], header[1], header[2], header[3]];
 
         if self.header.magic.is_ascii() {
-            let magic = str::from_utf8(&self.header.magic).unwrap().trim_end_matches('');
+            let magic = str::from_utf8(&self.header.magic)
+                .unwrap()
+                .trim_end_matches('');
             println!("ROM header: {}", magic);
 
             // Print bank sizes
@@ -180,26 +183,33 @@ impl Cartridge {
     }
 
     pub fn load_rom(&mut self, mut file: &File) {
-
         // The iNES header is 16 bytes long
-        let mut rom = vec![0u8; 3 * PRG_ROM_BANK_SIZE];
-        file.read(&mut rom).expect("Could not read rom file");
+        let mut header = vec![0_u8; 16];
+        file.read_exact(&mut header)
+            .expect("Could not read rom file");
+        self.header = self.validate_header(&header).unwrap();
 
-        let header = self.validate_header(&rom).unwrap();
-        self.header = header;
+        let mut prg: Vec<u8> = vec![0; PRG_ROM_BANK_SIZE];
+        let mut chr: Vec<u8> = vec![0; CHR_ROM_BANK_SIZE];
 
-        let prg_lenght;
-        // TODO Handle this better. We need to check the sizes here & allocate accordingly.
-
-        if self.header.prg_rom_page_size == 1 {
-            prg_lenght = 0x4000;
-        } else {
-            prg_lenght = 0x8000;
+        file.read_exact(&mut prg).unwrap();
+        let prg_size = match self.header.prg_rom_page_size {
+            1 => 16384,
+            2 => 32768,
+            _ => panic!("Prg size not implemented"),
+        };
+        for i in 0..prg_size {
+            self.prg[i as usize] = prg[i as usize];
         }
-        for i in 0..prg_lenght {
-                self.prg[i as usize] = rom[(0x10 + i) as usize];
-        }
+        let chr_size = match self.header.chr_rom_page_size {
+            1 => 8192,
+            2 => 16384,
+            _ => panic!("Chr size not implemented"),
+        };
 
+        file.read_exact(&mut chr).unwrap();
+        for i in 0..chr_size {
+            self.chr[i as usize] = chr[i as usize];
+        }
     }
 }
-

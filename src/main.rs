@@ -2,10 +2,10 @@
 #![allow(clippy::cast_possible_truncation)]
 #![allow(clippy::too_many_lines)]
 
-use minifb;
+// use minifb;
 use flexi_logger;
 
-mod rom;
+mod cartridge;
 mod interconnect;
 mod opcode;
 mod memory;
@@ -23,6 +23,7 @@ use opcode::Instruction;
 use flexi_logger::{Logger, LogTarget, opt_format, default_format};
 use log::{info, error, warn, debug};
 use std::borrow::{BorrowMut, Borrow};
+use ppu::FrameBuffer;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -44,6 +45,7 @@ fn main() {
 
     debug!("Loaded rom:{:?}", path.file_name().unwrap());
 
+    let mut display = FrameBuffer::new();
     let mut ctx = ExecutionContext::new();
     ctx.reset_cpu();
     ctx.ppu.get_mut().reset_ppu();
@@ -60,6 +62,9 @@ fn main() {
     // ctx.cpu.reg.pc = 0xc000;
     // let err1 = ctx.read8(0x02);
     // let err2 = ctx.read8(0x03);
+    // Fill nametable 0 with CHR data
+    ctx.ppu.borrow_mut().fill_pattern_table();
+
 
     loop {
         let step: bool = false;
@@ -68,6 +73,9 @@ fn main() {
         }
         log(ctx.borrow());
         run(ctx.borrow_mut());
+        // ctx.ppu.borrow_mut().draw_chr();
+        // display.window.update_with_buffer(&ctx.ppu.borrow_mut().draw_chr());
+        // ctx.ppu.borrow_mut().draw_pattern_table(0);
     }
 }
 

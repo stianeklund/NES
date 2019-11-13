@@ -1,7 +1,7 @@
 use crate::interconnect::{MemoryMapper, AddressMatch};
 use crate::opcode::Instruction;
 use crate::memory::Ram;
-use crate::rom::Cartridge;
+use crate::cartridge::Cartridge;
 use crate::ppu::{Ppu, FrameBuffer};
 use crate::apu::Apu;
 use log::{info, warn, debug, error};
@@ -23,7 +23,7 @@ impl MemoryMapper for ExecutionContext {
             0x2007 => self.ppu.borrow_mut().reg.read_ppu_data(),
             0x2008 ..= 0x3fff => self.ppu.borrow_mut().read_ppu_reg(0x2000 + (addr & 0b111)),
             0x4000 ..= 0x4013 => self.apu.read8(addr),
-            0x4016 => 0, // Controller input
+            0x4016 | 0x4017 => { println!("Read to controller port"); 0},
             0x4018 ..= 0x401f => 0, //  unimplemented!("Read to CPU Test space. Address:{:04x}", addr),
             0x4020 ..= 0x5fff => 0, // unimplemented!("Read to expansion rom. Address:{:04x}", addr),
             0x8000 ..= 0xffff => {
@@ -35,7 +35,7 @@ impl MemoryMapper for ExecutionContext {
                 };
                 self.cart.prg[addr as usize & mask_amount]
             }
-            _ => { 0 }
+            _ => 0,
         }
     }
     fn read16(&self, addr: u16) -> u16 {
@@ -56,8 +56,6 @@ impl MemoryMapper for ExecutionContext {
             0x4015 ..= 0x4017 => eprintln!("Writing:0x{:x} to non implemented controller ports:{:x}", byte, addr),
             0x4014 => self.ppu.borrow_mut().write_ppu_reg(addr, byte),
             // 0x6000..=0x7fff => self.ram.sram[addr as usize] = byte,
-            // Some tests store ASCII characters in SRAM. Output as characters when writing to SRAM
-            // println!("Status: {:04x}", self.ram.sram[0x6000]);
             0x8000 ..= 0xffff => {
                 eprintln!("Attempting to write to PRG ROM. Address:${:04x} Byte:{:02x}", addr, byte);
                 // self.cart.prg[addr as usize & 0x3fff] = byte;
