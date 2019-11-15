@@ -13,6 +13,7 @@ mod cpu;
 mod ppu;
 mod apu;
 mod ppu_registers;
+mod palette;
 
 use std::path::Path;
 use std::io::{self, Read};
@@ -65,17 +66,15 @@ fn main() {
     // Fill nametable 0 with CHR data
     ctx.ppu.borrow_mut().fill_pattern_table();
 
-
+    // ctx.ppu.borrow_mut().test_chr();
     loop {
         let step: bool = false;
         if step {
             io::stdin().read_line(&mut String::new()).unwrap();
         }
-        log(ctx.borrow());
+        // log(ctx.borrow());
+        display.window.update_with_buffer(&ctx.ppu.borrow_mut().test_chr()).unwrap();
         run(ctx.borrow_mut());
-        // ctx.ppu.borrow_mut().draw_chr();
-        // display.window.update_with_buffer(&ctx.ppu.borrow_mut().draw_chr());
-        // ctx.ppu.borrow_mut().draw_pattern_table(0);
     }
 }
 
