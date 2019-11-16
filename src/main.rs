@@ -1,10 +1,6 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::cast_possible_truncation)]
 #![allow(clippy::too_many_lines)]
-
-// use minifb;
-use flexi_logger;
-
 mod cartridge;
 mod interconnect;
 mod opcode;
@@ -63,18 +59,19 @@ fn main() {
     // ctx.cpu.reg.pc = 0xc000;
     // let err1 = ctx.read8(0x02);
     // let err2 = ctx.read8(0x03);
-    // Fill nametable 0 with CHR data
-    ctx.ppu.borrow_mut().fill_pattern_table();
 
-    // ctx.ppu.borrow_mut().test_chr();
+    // Fill nametable 0 with CHR data
+    ctx.ppu.borrow_mut().fill_pattern_table(&ctx.cart);
+    // Draw pattern tables
+    display.window.update_with_buffer(&ctx.ppu.borrow_mut().draw_pattern_tables()).unwrap();
     loop {
         let step: bool = false;
         if step {
             io::stdin().read_line(&mut String::new()).unwrap();
         }
         // log(ctx.borrow());
-        display.window.update_with_buffer(&ctx.ppu.borrow_mut().test_chr()).unwrap();
         run(ctx.borrow_mut());
+        display.window.update();
     }
 }
 

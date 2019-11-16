@@ -157,13 +157,12 @@ impl Cartridge {
             println!("PRG RAM {}  8KB Pages", header[8]);
 
             // TODO Research mappers & add more
-            let id = match self.mapper_id {
-                0 => "NROM",
-                1 => "MMC1",
-                2 => "UxROM",
-                _ => "Unknown mapper",
+            let (id, string) = match self.mapper_id {
+                0 => (0, "NROM"),
+                1 => (1, "MMC1"),
+                2 => (2, "UxROM"),
+                _ => panic!("Unimplemented mapper")
             };
-            println!("Mapper ID:{}         ", id);
         }
 
         // Return header information
@@ -206,7 +205,6 @@ impl Cartridge {
             2 => 16384,
             _ => panic!("Chr size not implemented"),
         };
-
         file.read_exact(&mut chr).unwrap();
         for i in 0..chr_size {
             self.chr[i as usize] = chr[i as usize];

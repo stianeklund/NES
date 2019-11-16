@@ -8,10 +8,10 @@ use crate::interconnect::{Interconnect, MemoryMapper};
 use crate::ppu_registers::*;
 use crate::cpu::ExecutionContext;
 use crate::palette::{PALETTE, TEST_PALETTE};
-use blit::*;
+use std::ops::{IndexMut, Index};
 
-const WIDTH: u32 = 256;
-const HEIGHT: u32 = 240;
+const WIDTH: usize = 128;
+const HEIGHT: usize = 256;
 const PALLET_SIZE: usize = 0x20;
 const NAMETABLE_SIZE: usize = 0x800;
 const SCANLINE_CYCLES: usize = 341;
@@ -35,22 +35,25 @@ pub struct Ppu {
     pub reg: Registers,
     pub attribute_table: Vec<u8>,
     pub vram: Vec<u8>,
-    pub cart: Cartridge,
     pub buffer: Vec<u32>,
     // pub buffer: Box<[u16; 258 * 240]>,
 }
-
+impl Index<u16> for Ppu {
+    type Output = u8;
+    fn index(&self, index :u16) -> &u8 {
+        &self.pattern_tables[index as usize]
+    }
+}
+impl IndexMut<u16> for Ppu {
+    fn index_mut(&mut self, index: u16) -> &mut u8 {
+        &mut self.pattern_tables[index as usize]
+    }
+}
 pub struct FrameBuffer {
     pub ppu: Ppu,
     pub fb: Vec<u32>,
     pub window: Window,
 }
-/*impl Index<u16> for Ppu {
-    type Output = u8;
-    fn index(&self, index: u16) -> &Self::Output {
-        &self.pattern_tables[index as usize]
-    }
-}*/
 impl FrameBuffer {
     pub fn new() -> Self {
         let mut window = Window::new(
@@ -60,7 +63,7 @@ impl FrameBuffer {
             WindowOptions {
                 borderless: false,
                 title: true,
-                resize: false,
+                resize: true,
                 scale: Scale::X2
             },
         ).unwrap();
@@ -91,7 +94,6 @@ impl Ppu {
             buffer: vec![0xffffffff; WIDTH as usize * HEIGHT as usize * 4],
             // buffer: Box::new([0_u16; 258 * 240]),
             vram: vec![0; 0x16000],
-            cart: Cartridge::new(),
         }
     }
     pub fn write_ppu_reg(&mut self, addr: u16, byte: u8) {
@@ -135,8 +137,8 @@ impl Ppu {
         0_u8
     }
     // Copy the first 8kB of the pattern table (from CHR rom)
-    pub fn fill_pattern_table(&mut self) {
-        self.pattern_tables = self.cart.chr.clone();
+    pub fn fill_pattern_table(&mut self, cart: &Cartridge) {
+        self.pattern_tables = cart.chr.clone();
     }
 
     // PPU Reset
@@ -150,34 +152,20 @@ impl Ppu {
     }
     // TODO See link below for details on each registry and bit values
     // https://wiki.nesdev.com/w/index.php/PPU_registers#PPUSTATUS
-    pub fn test_chr(&mut self) -> &Vec<u32> {
-        for row in 0..WIDTH {
-            for column in 0..128 {
+    pub fn draw_pattern_tables(&mut self) -> &Vec<u32> {
+        for row in 0..HEIGHT {
+            for column in 0..WIDTH {
                 let tile_addr = (row / 8 * 0x100) + (row % 8) + (column / 8) * 0x10;
-                // The entire two pattern tables
+                // Render both pattern tables
                 let tile_pixel = ((self.read8(tile_addr as u16) >> (7 - (column % 8))) & 1) +
                     ((self.read8((tile_addr + 8) as u16) >> (7 - (column % 8))) & 1) * 3;
 
-                // Always 0 for some reason
-                //let tile_pixel = ((self.pattern_tables[tile_addr as usize] >> (7 - (column % 8))) & 1) +
-                // ((self.pattern_tables[tile_addr as usize + 8] >> (7 - (column % 8))) & 1) * 3;
-
-                // self.buffer[row as usize * 128 as usize * 3 + column as usize * 3] = PALETTE[tile_pixel as usize].into();
-                // self.buffer[(row as usize * row as usize * 3) + column as usize * 3 + 1] = PALETTE[tile_pixel as usize].into();
-                // self.buffer[row as usize * HEIGHT as usize * 3 + column as usize * 3 + 2] = PALETTE[tile_pixel as usize].into();
-
-
-                // TEST (Just spit out some garbage to see if we can at least render some pixels
-                self.buffer[row as usize * HEIGHT as usize * 3 + column as usize * 3 + 1] = TEST_PALETTE[1];
-                // self.buffer[row as usize * HEIGHT as usize * 3 + column as usize * 3 + 2] = TEST_PALETTE[2];
-                // self.buffer[row as usize * HEIGHT as usize * 3 + column as usize * 3 + 3] = TEST_PALETTE[3];
-
-                if tile_pixel != 0 {
-                    eprintln!("Tile_addr:${:x}, tile_pixel:{:x}", tile_addr, tile_pixel);
-                }
+                // HEIGHT * WIDTH + Offset = Pixel
+                self.buffer[row * WIDTH + column ]    = TEST_PALETTE[tile_pixel as usize];
+                self.buffer[row * WIDTH + column + 1] = TEST_PALETTE[tile_pixel as usize];
+                self.buffer[row * WIDTH + column + 2] = TEST_PALETTE[tile_pixel as usize];
             };
         }
-        // &self.pattern_tables
         &self.buffer
     }
         pub fn step(&mut self) {
