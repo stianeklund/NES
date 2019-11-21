@@ -63,7 +63,8 @@ fn main() {
     // Fill nametable 0 with CHR data
     ctx.ppu.borrow_mut().fill_pattern_table(&ctx.cart);
     // Draw pattern tables
-    display.window.update_with_buffer(&ctx.ppu.borrow_mut().draw_pattern_tables()).unwrap();
+    // display.window.update_with_buffer(&ctx.ppu.borrow_mut().draw_pattern_tables()).unwrap();
+    display.window.update_with_buffer(&ctx.ppu.borrow_mut().draw_name_tables()).unwrap();
     loop {
         let step: bool = false;
         if step {

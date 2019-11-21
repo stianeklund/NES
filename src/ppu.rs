@@ -4,17 +4,17 @@ use std::fmt::LowerHex;
 use std::fmt::{Debug, Formatter, Result};
 
 use crate::cartridge::Cartridge;
-use crate::interconnect::{Interconnect, MemoryMapper};
-use crate::ppu_registers::*;
 use crate::cpu::ExecutionContext;
-use crate::palette::{PALETTE, TEST_PALETTE};
-use std::ops::{IndexMut, Index};
+use crate::interconnect::{Interconnect, MemoryMapper};
+use crate::palette::{palette, palette_u32, PALETTE, PALETTE_U32, TEST_PALETTE};
+use crate::ppu_registers::*;
+use std::ops::{Index, IndexMut};
 
-const WIDTH: usize = 128;
+const WIDTH: usize = 240;
 const HEIGHT: usize = 256;
 const PALLET_SIZE: usize = 0x20;
 const NAMETABLE_SIZE: usize = 0x800;
-const SCANLINE_CYCLES: usize = 341;
+const SCANLINE_CYCLES: usize = 340;
 const SCANLINE_FRAMES: usize = 261;
 
 pub struct Ppu {
@@ -40,7 +40,7 @@ pub struct Ppu {
 }
 impl Index<u16> for Ppu {
     type Output = u8;
-    fn index(&self, index :u16) -> &u8 {
+    fn index(&self, index: u16) -> &u8 {
         &self.pattern_tables[index as usize]
     }
 }
@@ -64,9 +64,10 @@ impl FrameBuffer {
                 borderless: false,
                 title: true,
                 resize: true,
-                scale: Scale::X2
+                scale: Scale::X2,
             },
-        ).unwrap();
+        )
+        .unwrap();
         Self {
             ppu: Ppu::new(),
             fb: vec![0; WIDTH as usize * HEIGHT as usize],
@@ -85,13 +86,13 @@ impl Ppu {
 
             vblank: false,
             nmi_occurred: false,
-            pattern_tables: vec![0; 0x0016_0000],
+            pattern_tables: vec![0; 0x16000],
             system_palette: vec![0; 64],
             frame_palette: vec![0; 8],
-            nametable: vec![0; 2048],
+            nametable: vec![0; 0x16000],
             reg: Registers::default(),
             attribute_table: vec![],
-            buffer: vec![0xffffffff; WIDTH as usize * HEIGHT as usize * 4],
+            buffer: vec![0xff00_0000; WIDTH as usize * 1024 as usize * 4],
             // buffer: Box::new([0_u16; 258 * 240]),
             vram: vec![0; 0x16000],
         }
@@ -139,6 +140,8 @@ impl Ppu {
     // Copy the first 8kB of the pattern table (from CHR rom)
     pub fn fill_pattern_table(&mut self, cart: &Cartridge) {
         self.pattern_tables = cart.chr.clone();
+        self.nametable = cart.chr.clone();
+        self.vram = cart.chr.clone();
     }
 
     // PPU Reset
@@ -150,64 +153,93 @@ impl Ppu {
         self.reg.write_ppu_mask(0);
         self.reg.write_oam_addr(0);
     }
-    // TODO See link below for details on each registry and bit values
-    // https://wiki.nesdev.com/w/index.php/PPU_registers#PPUSTATUS
-    pub fn draw_pattern_tables(&mut self) -> &Vec<u32> {
+    pub fn draw_name_tables(&mut self) -> &Vec<u32> {
         for row in 0..HEIGHT {
             for column in 0..WIDTH {
-                let tile_addr = (row / 8 * 0x100) + (row % 8) + (column / 8) * 0x10;
-                // Render both pattern tables
-                let tile_pixel = ((self.read8(tile_addr as u16) >> (7 - (column % 8))) & 1) +
-                    ((self.read8((tile_addr + 8) as u16) >> (7 - (column % 8))) & 1) * 3;
+                // Row of a tile is 0..=7
+                let tile_number = self.vram[((row / 8 * 32) + (column / 8)) as usize];
+                let tile_attribute = self.vram[0];
+                let tile_addr = self.vram[0x2000 + (row / 8 * 0x100) + (row % 8) + (column / 8) * 0x10];
+                let addr: u16 = (self.reg.ppu_ctrl.backgrnd_pattern_table_addr + (tile_number * 0x10) + row as u8 % 8).into();
+                let pixel = ((self.vram[addr as usize] >> (7 - (column % 8))) & 1)
+                    + ((self.vram[addr as usize + 8]) >> (7 - (column % 8)) & 1) * 3;
+                let index = (row * WIDTH) + column as usize;
 
-                // HEIGHT * WIDTH + Offset = Pixel
-                self.buffer[row * WIDTH + column ]    = TEST_PALETTE[tile_pixel as usize];
-                self.buffer[row * WIDTH + column + 1] = TEST_PALETTE[tile_pixel as usize];
-                self.buffer[row * WIDTH + column + 2] = TEST_PALETTE[tile_pixel as usize];
-            };
+                self.buffer[index] = palette_u32(pixel);
+                // self.buffer[index + 1] = palette_u32(pixel);
+                // self.buffer[index + 2] = palette_u32(pixel);
+                // self.buffer[(row * WIDTH ) + column] = PALETTE_U32[tile_pixel as usize];
+                // self.buffer[(row * WIDTH ) + column] = PALETTE_U32[tile_pixel  as usize + 2];
+                // self.buffer[(row * WIDTH ) + column] = PALETTE_U32[tile_pixel as usize + 3];
+            }
         }
         &self.buffer
     }
-        pub fn step(&mut self) {
-            self.cycle += 1;
-            if self.cycle >= SCANLINE_CYCLES {
-                // 341 cycles (X coordinate)
-                self.cycle = 0;
-                self.scanline += 1;
-                if self.scanline >= SCANLINE_FRAMES {
-                    // 261 cycles (Y Coordinate)
-                    self.scanline -= 1;
-                    self.frame_complete = true;
-                }
-            }
-            // If our scanline has reached the VBLANK area (241 - 260), and we've at least run one
-            // PPU cycle, we're in VBLANK
-            if self.scanline == 241 && self.cycle == 1 {
-                self.reg.ppu_status.vblank_start = true; // Set at dot 1 of line 241 (i.e cycle 1, scanline 241)
-                self.vblank = true;
-                // TODO NMI should probably not fire here?
-                self.nmi_occurred = true;
+    // TODO See link below for details on each registry and bit values
+    // https://wiki.nesdev.com/w/index.php/PPU_registers#PPUSTATUS
+    pub fn draw_pattern_tables(&mut self) -> &Vec<u32> {
+        for row in 0..WIDTH {
+            for column in 0..HEIGHT {
+                // Row of a tile is 0..=7
+                let tile_addr = (row / 8 * 0x100) + (row % 8) + (column / 8) * 0x10;
+                // Render both pattern tables
+                // Bit depth of 3
+                let tile_pixel = ((self.read8(tile_addr as u16) >> (7 - (column % 8))) & 1)
+                    + ((self.read8((tile_addr + 8) as u16) >> (7 - (column % 8))) & 1) * 3;
+                let index = row * WIDTH + column as usize;
 
-                if self.reg.ppu_ctrl.nmi_result > 0 {
-                    self.nmi_occurred = true;
-                    eprintln!(
-                        "NMI occurred. Scanline:{}, PPU Cycle:{}",
-                        self.scanline, self.cycle
-                    );
-                }
-            } else if self.scanline == 261 && self.reg.ppu_status.sprite_zero_hit {
-                self.vblank = false;
-                self.nmi_occurred = false;
-            }
-            if self.scanline == 1 && self.cycle == 1 {
-                self.reg.ppu_status.vblank_start = false; // Clear at pre-render line
-                self.nmi_occurred = false;
-                self.vblank = false;
-                self.reg.ppu_status.sprite_overflow = false;
-                self.reg.ppu_status.sprite_zero_hit = false;
+                self.buffer[index] = palette_u32(tile_pixel);
+                // self.buffer[index + 1] = palette_u32(tile_pixel);
+                // self.buffer[index + 2] = palette_u32(tile_pixel);
+                // self.buffer[(row * WIDTH) + column] = palette(tile_pixel);
+                // self.buffer[(row * WIDTH) + column] = palette(tile_pixel);
+                // self.buffer[(row * WIDTH) + column] = palette(tile_pixel);
+                // self.buffer[(row * WIDTH ) + column] = PALETTE[tile_pixel  as usize + 2] as u32;
+                // self.buffer[(row * WIDTH ) + column] = PALETTE[tile_pixel as usize + 3] as u32;
             }
         }
+        &self.buffer
     }
+    pub fn step(&mut self) {
+        self.cycle += 1;
+        // Each scanline consists of 340 PPU Cycles
+        if self.cycle > SCANLINE_CYCLES {
+            self.cycle -= 341;
+            self.scanline += 1;
+            if self.scanline >= SCANLINE_FRAMES {
+                // 261 cycles (Y Coordinate)
+                self.scanline -= 1;
+                self.frame_complete = true;
+            }
+        }
+        // If our scanline has reached the VBLANK area (241 - 260), and we've at least run one
+        // PPU cycle, we're in VBLANK
+        if self.scanline == 241 && self.cycle == 1 {
+            self.reg.ppu_status.vblank_start = true; // Set at dot 1 of line 241 (i.e cycle 1, scanline 241)
+            self.vblank = true;
+            // TODO NMI should probably not fire here?
+            self.nmi_occurred = true;
+
+            if self.reg.ppu_ctrl.nmi_result > 0 {
+                self.nmi_occurred = true;
+                eprintln!(
+                    "NMI occurred. Scanline:{}, PPU Cycle:{}",
+                    self.scanline, self.cycle
+                );
+            }
+        } else if self.scanline == 261 && self.reg.ppu_status.sprite_zero_hit {
+            self.vblank = false;
+            self.nmi_occurred = false;
+        }
+        if self.scanline == 1 && self.cycle == 1 {
+            self.reg.ppu_status.vblank_start = false; // Clear at pre-render line
+            self.nmi_occurred = false;
+            self.vblank = false;
+            self.reg.ppu_status.sprite_overflow = false;
+            self.reg.ppu_status.sprite_zero_hit = false;
+        }
+    }
+}
 
 // The PPU addresses a 16kB space, $0000-3FFF.
 impl MemoryMapper for Ppu {

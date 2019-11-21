@@ -163,6 +163,7 @@ impl Cartridge {
                 2 => (2, "UxROM"),
                 _ => panic!("Unimplemented mapper")
             };
+            println!("Mapper:{}", string);
         }
 
         // Return header information
