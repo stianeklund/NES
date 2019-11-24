@@ -20,7 +20,7 @@ impl MemoryMapper for ExecutionContext {
             0x2002 => self.ppu.borrow_mut().reg.read_status(),
             0x2003 | 0x2005 | 0x2006 => 0, //self.ppu.borrow_mut().dummy_read(addr),
             0x2004 => self.ppu.borrow_mut().reg.read_oam_data(),
-            0x2007 => self.ppu.borrow_mut().reg.read_ppu_data(),
+            0x2007 => self.ppu.borrow_mut().read_ppu_reg(addr),
             0x2008 ..= 0x3fff => self.ppu.borrow_mut().read_ppu_reg(0x2000 + (addr & 0b111)),
             0x4000 ..= 0x4013 => self.apu.read8(addr),
             0x4016 | 0x4017 => { println!("Read to controller port"); 0},
@@ -119,7 +119,7 @@ pub struct StatusRegister {
     reserved: bool,
     brk: bool,
     decimal: bool,
-    interrupt: bool,
+    pub interrupt: bool,
     zero: bool,
     carry: bool,
 
@@ -138,8 +138,8 @@ pub struct Registers {
 #[derive(Debug)]
 pub struct Cpu {
     pub reg: Registers,
-    flags: StatusRegister,
-    pub cycles: usize,
+    pub flags: StatusRegister,
+    pub cycles: u64,
     pub opcode: u8,
     pub p: u8,
 }
@@ -190,8 +190,8 @@ impl ExecutionContext {
     fn adv_pc(&mut self, offset: u16) {
         self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
     }
-    fn adv_cycles(&mut self, amount: u16) {
-       self.cpu.cycles = self.cpu.cycles.wrapping_add(amount as usize);
+    fn adv_cycles(&mut self, amount: u64) {
+       self.cpu.cycles = self.cpu.cycles.wrapping_add(amount);
     }
     fn adv(&mut self, mode: AddressMode<u16>) {
         match self.cpu.opcode {
@@ -217,11 +217,11 @@ impl ExecutionContext {
         }
     }
     // Immediate
-    fn imm(&self) -> AddressMode<u8> {
+    fn imm(&self) -> AddressMode<u16> {
         let address = self.cpu.reg.pc + 1;
         AddressMode {
             address,
-            data: self.read8(address),
+            data: self.read8(address) as u16,
             byte_length: 2,
             cycle_length: 2
         }
@@ -259,7 +259,7 @@ impl ExecutionContext {
             address,
             data: self.read8(address),
             byte_length: 2,
-            cycle_length: 2
+            cycle_length: 1
         }
     }
     fn zp(&self) -> AddressMode <u8> {
@@ -332,14 +332,13 @@ impl ExecutionContext {
         self.cpu.opcode = opcode as u8;
         self.cpu.p = self.get_status_flags();
         // Make debug printing look like Nintendulator
-        if self.debug {
-            info!("{:04X}  {:02X} {:02X}     {} A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X}",
-                  self.cpu.reg.pc, opcode, // Addr
-                  self.read8(self.cpu.reg.pc + 1),  // Operand
-                  Instruction::short_mnemonic(opcode),
-                  self.cpu.reg.a, self.cpu.reg.x, self.cpu.reg.y,
-                  self.cpu.p, self.cpu.reg.sp);
-        }
+        info!("{:04X}  {:02X} {:02X}     {} A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X} PPU:{},{} CYC:{}",
+              self.cpu.reg.pc, self.read8(self.cpu.reg.pc), // Addr
+              self.read8(self.cpu.reg.pc + 1),  // Operand
+              Instruction::short_mnemonic(self.read8(self.cpu.reg.pc)),
+              self.cpu.reg.a, self.cpu.reg.x, self.cpu.reg.y,
+              self.cpu.p, self.cpu.reg.sp, self.ppu.borrow().cycle, self.ppu.borrow().scanline, self.cpu.cycles);
+
         let mode: AddressMode<u16> = match opcode {
             0x00 | 0x02 => self.brk(self.implied(7)),
             0x01 => self.ora(AddressMode::from(self.indirect_x())),
@@ -371,10 +370,12 @@ impl ExecutionContext {
             0x0a => self.asla(self.implied(2)),
             0xa0 => self.ldy(self.imm().into()),
             0xa1 => self.lda(AddressMode::from(self.indirect_x())),
-            0xa2 => self.ldx(self.imm().into()),
+            0xa2 => self.ldx(self.imm()),
+            0xa3 => self.lax(AddressMode::from(self.indirect_x())),
             0xa4 => self.ldy(AddressMode::from(self.zp())),
             0xa5 => self.lda(AddressMode::from(self.zp())),
             0xa6 => self.ldx(AddressMode::from(self.zp())),
+            0xa7 => self.lax(AddressMode::from(self.zp())),
             0xa8 => self.tay(self.implied(2)),
             0xa9 => self.lda(self.imm().into()),
             0xaa => self.tax(self.implied(2)),
@@ -384,15 +385,18 @@ impl ExecutionContext {
             0xaf => self.lax(self.abs()),
             0xb0 => self.bcs(AddressMode::from(self.relative())),
             0xb1 => self.lda(AddressMode::from(self.indirect_y())),
+            0xb3 => self.lax(AddressMode::from(self.indirect_y())),
             0xb4 => self.ldy(self.zp_x()),
             0xb5 => self.lda(self.zp_x()),
             0xb6 => self.ldx(self.zp_y()),
+            0xb7 => self.lax(self.abs()),
             0xb8 => self.clv(self.implied(2)),
             0xb9 => self.lda(self.abs_y()),
             0xba => self.tsx(self.implied(2)),
             0xbc => self.ldy(self.abs_x()),
             0xbd => self.lda(self.abs_x()),
             0xbe => self.ldx(self.abs_y()),
+            0xbf => self.lax(self.abs()),
             0xc0 => self.cpy(self.imm().into()),
             0xc1 => self.cmp(AddressMode::from(self.indirect_x())),
             0xc5 => self.cmp(AddressMode::from(self.zp())),
@@ -456,14 +460,15 @@ impl ExecutionContext {
             0x79 => self.adc(self.abs_y()),
             0x7d => self.adc(self.abs_x()),
             0x7e => self.ror(self.abs_x()),
-            0x80 => self.dop(AddressMode::from(self.imm())),
+            0x80 => self.dop(self.imm()),
             0x81 => self.sta(AddressMode::from(self.indirect_x())),
-            0x82 => self.dop(AddressMode::from(self.imm())),
+            0x82 => self.dop(self.imm()),
+            0x83 => unimplemented!("SAX not implemented"),
             0x84 => self.sty(AddressMode::from(self.zp())),
             0x85 => self.sta(AddressMode::from(self.zp())),
             0x86 => self.stx(AddressMode::from(self.zp())),
             0x88 => self.dey(self.implied(2)),
-            0x89 => self.dop(AddressMode::from(self.imm())),
+            0x89 => self.dop(self.imm()),
             0x8a => self.txa(self.implied(2)),
             0x8c => self.sty(self.abs()),
             0x8d => self.sta(self.abs()),
@@ -477,11 +482,11 @@ impl ExecutionContext {
             0x99 => self.sta(self.abs_y()),
             0x9a => self.txs(self.implied(2)),
             0x9d => self.sta(self.abs_x()),
-            0xc2 => self.dop(AddressMode::from(self.imm())),
+            0xc2 => self.dop(self.imm()),
             // 0xc3 => self.dcp(), // ILLEGAL
             0xc4 => self.cpy(AddressMode::from(self.zp())),
             0xc6 => self.dec(AddressMode::from(self.zp())),
-            0xc9 => self.cmp(AddressMode::from(self.imm())),
+            0xc9 => self.cmp(self.imm()),
             0xca => self.dex(self.implied(2)),
             0xce => self.dec(self.abs()),
             0xcd => self.cmp(self.abs()),
@@ -499,7 +504,7 @@ impl ExecutionContext {
             0xde => self.dec(self.abs_x()),
             0xe0 => self.cpx(self.imm().into()),
             0xe1 => self.sbc(AddressMode::from(self.indirect_x())),
-            0xe2 => self.dop(AddressMode::from(self.imm())),
+            0xe2 => self.dop(self.imm()),
             0xe4 => self.cpx(AddressMode::from(self.zp())),
             0xe5 => self.sbc(AddressMode::from(self.zp())),
             0xe6 => self.inc(AddressMode::from(self.zp())),
@@ -522,6 +527,7 @@ impl ExecutionContext {
             0xff => self.isc(self.abs_x()),
             0x1e => self.asl(self.abs_x()),
             _ => unimplemented!("Unknown opcode:{:02x}", opcode),
+
         };
         self.adv(mode);
     }
@@ -762,7 +768,7 @@ impl ExecutionContext {
     }
     fn ldx(&mut self, value: AddressMode <u16>) -> AddressMode<u16> {
         self.cpu.reg.x = value.data as u8;
-        self.cpu.flags.zero = self.cpu.reg.x == 0;
+        self.cpu.flags.zero = self.cpu.reg.x & 0xff == 0;
         self.cpu.flags.negative = (self.cpu.reg.x & 0x80) != 0;
         value
     }
@@ -927,6 +933,7 @@ impl ExecutionContext {
         self.cpu.flags.zero = self.cpu.reg.a == 0;
         self.cpu.flags.negative = (self.cpu.reg.a & 0x80) != 0;
         mode
+
     }
     // Transfer X to Accumulator
     fn txa(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> {
@@ -1073,6 +1080,7 @@ impl ExecutionContext {
     // Reset CPU to initial power up state
     pub fn reset_cpu(&mut self) {
         self.cpu.reg.pc = self.read16(0xfffc);
+        self.cpu.cycles = 7;
         self.cpu.reg.sp = 0xfd;
         self.cpu.flags.carry = false;
         self.cpu.flags.zero = false;

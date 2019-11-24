@@ -26,7 +26,7 @@ pub struct PpuCtrl {
     pub backgrnd_pattern_table_addr: u8,
     pub sprite_size: u8,
     pub master_slave_select: u8,
-    pub nmi_result: u8,
+    pub nmi_occurred: u8,
 }
 // PPUMASK $2001 (write)
 #[derive(Debug, Default)]
@@ -99,7 +99,7 @@ impl Registers {
         self.ppu_ctrl.backgrnd_pattern_table_addr = value >> 4 & 1;
         self.ppu_ctrl.sprite_size = value >> 5 & 1;
         self.ppu_ctrl.master_slave_select = value >> 6 & 1;
-        self.ppu_ctrl.nmi_result = value >> 7 & 1;
+        self.ppu_ctrl.nmi_occurred = value >> 7 & 1;
         // eprintln!("PPUCTRL:{:x?}", self.ppu_ctrl);
         // eprintln!("Background PPU Table Addr:{:04x}", self.ppu_ctrl.backgrnd_pattern_table_addr);
     }
@@ -142,7 +142,9 @@ impl Registers {
 
     }
     // $2007
-    pub fn write_ppu_data(&mut self, value: u8) { self.ppu_data.data = value; }
+    pub fn write_ppu_data(&mut self, value: u8) {
+        self.ppu_data.data = value;
+    }
     pub fn read_ppu_data(&mut self) -> u8 {
         let data = self.ppu_data.data;
         // self.ppu_addr.addr += 1;

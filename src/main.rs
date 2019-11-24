@@ -57,41 +57,36 @@ fn main() {
 
     // For nestest only
     // ctx.cpu.reg.pc = 0xc000;
-    // let err1 = ctx.read8(0x02);
-    // let err2 = ctx.read8(0x03);
 
-    // Fill nametable 0 with CHR data
-    ctx.ppu.borrow_mut().fill_pattern_table(&ctx.cart);
+    // ctx.ppu.borrow_mut().fill_pattern_table(&ctx.cart);
     // Draw pattern tables
     // display.window.update_with_buffer(&ctx.ppu.borrow_mut().draw_pattern_tables()).unwrap();
-    display.window.update_with_buffer(&ctx.ppu.borrow_mut().draw_name_tables()).unwrap();
+    // display.window.update_with_buffer(&ctx.ppu.borrow_mut().draw_name_tables()).unwrap();
+
+    let mut cycle = 0;
     loop {
         let step: bool = false;
         if step {
             io::stdin().read_line(&mut String::new()).unwrap();
         }
-        // log(ctx.borrow());
         run(ctx.borrow_mut());
-        display.window.update();
+        display.window.update_with_buffer(&ctx.ppu.borrow().buffer).unwrap();
+        // display.window.update()
     }
 }
 
 fn run(ctx: &mut ExecutionContext) {
-    let mut cycle =0;
-    if ctx.ppu.borrow_mut().nmi_occurred {
-            eprintln!("NMI enabled");
-        }
-        if ctx.ppu.borrow().nmi_occurred {
-            ctx.ppu.borrow_mut().vblank = false;
-            ctx.ppu.borrow_mut().nmi_occurred = false;
-            ctx.nmi();
-            eprintln!("Executing NMI, turning vblank & NMI flags off");
-        }
-        ctx.ppu.borrow_mut().step();
-    if cycle % 3 == 0 {
-        ctx.decode();
+    // log(ctx.borrow());
+
+    ctx.decode();
+    if ctx.ppu.borrow().reg.ppu_ctrl.nmi_occurred != 0 &&
+        ctx.ppu.borrow().reg.ppu_status.vblank_start {
+        ctx.nmi();
+        // eprintln!("Executing NMI, turning vblank & NMI flags off");
+        ctx.ppu.borrow_mut().nmi_occurred = false;
     }
-    cycle += 1;
+    // TODO The PPU should not clock if we're in a DMA transfer
+    ctx.ppu.borrow_mut().step();
 }
 fn log(ctx: &ExecutionContext) {
     info!("{:04X}  {:02X} {:02X}     {} A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X} PPU:{} CYC:{}",

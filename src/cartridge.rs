@@ -13,7 +13,7 @@ use std::str;
 //  0-3: Constant $4E $45 $53 $1A ("NES" followed by MS-DOS end-of-file)
 //  4: Size of PRG ROM in 16 KB units
 //  5: Size of CHR ROM in 8 KB units (Value 0 means the board uses CHR RAM)
-//  6: Flags 6
+//  6: Flags 6 Vertical mirroring
 //  7: Flags 7
 //  8: Size of PRG RAM in 8 KB units (Value 0 infers 8 KB for compatibility; see PRG RAM circuit)
 //  9: Flags 9
@@ -38,6 +38,7 @@ pub struct RomHeader {
     flags_9: u8,
     flags_10: u8,
     pub zero: [u8; 5],
+    pub mirroring: bool,
 }
 
 impl RomHeader {
@@ -54,6 +55,7 @@ impl RomHeader {
             flags_9: 0,
             flags_10: 0,
             zero: [0; 5],
+            mirroring: false,
         }
     }
 }
@@ -164,6 +166,10 @@ impl Cartridge {
                 _ => panic!("Unimplemented mapper")
             };
             println!("Mapper:{}", string);
+            if self.header.flags_6 & 0b1 > 0 {
+                // println!("Mirroring true");
+                self.header.mirroring = true;
+            }
         }
 
         // Return header information
@@ -179,6 +185,7 @@ impl Cartridge {
             flags_9: 0,
             flags_10: header[9],
             zero: [header[11], header[12], header[13], header[14], header[15]],
+            mirroring: header[6] & 0b1 > 0,
         })
     }
 
@@ -188,6 +195,8 @@ impl Cartridge {
         file.read_exact(&mut header)
             .expect("Could not read rom file");
         self.header = self.validate_header(&header).unwrap();
+        // eprintln!("Mirroring:{}", self.header.mirroring);
+        // eprintln!("Mirroring:{}", self.header.flags_6 & 0b1 > 0);
 
         let mut prg: Vec<u8> = vec![0; PRG_ROM_BANK_SIZE];
         let mut chr: Vec<u8> = vec![0; CHR_ROM_BANK_SIZE];
