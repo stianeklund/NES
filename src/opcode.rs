@@ -1,14 +1,13 @@
+use crate::cpu::StatusRegister;
 use std::fmt;
-use crate::cpu::{StatusRegister};
 
 pub struct Instruction {
     pub opcode: u8,
     pub mnemonic: &'static str,
     pub bytes: u8,
     pub cycles: (u8, u8),
-    pub flags: &'static str
+    pub flags: &'static str,
 }
-
 
 impl fmt::UpperHex for Instruction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -32,18 +31,21 @@ impl fmt::UpperHex for Register {
 }
 impl fmt::Debug for Instruction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:04x} {:02x} {} {:?} {}",
-        self.opcode, self.bytes, self.mnemonic, self.cycles, self.flags)
+        write!(
+            f,
+            "{:04x} {:02x} {} {:?} {}",
+            self.opcode, self.bytes, self.mnemonic, self.cycles, self.flags
+        )
     }
 }
 
 impl Instruction {
-    pub fn default() ->     Self {
+    pub fn default() -> Self {
         Instruction {
             opcode: 0,
             bytes: 0,
             mnemonic: "",
-            cycles: (0,0),
+            cycles: (0, 0),
             flags: "",
         }
     }
@@ -196,7 +198,7 @@ impl Instruction {
             0xc4 => "CPY",
             0xc5 => "CMP",
             0xcc => "CPY",
-           // 0xc3 => "DCP",
+            // 0xc3 => "DCP",
             0xc6 => "DEC",
             0xda => "*NOP",
             0xdc => "*NOP",
@@ -240,9 +242,7 @@ impl Instruction {
             0xfd => "SBC",
             0xfe => "INC",
             0xff => "ISC",
-        _    => "Opcode not in print table, or invalid opcode",
+            _ => "Opcode not in print table, or invalid opcode",
         }
     }
 }
-
-

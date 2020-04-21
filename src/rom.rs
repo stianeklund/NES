@@ -1,12 +1,12 @@
+use crate::interconnect::MemoryMapper;
+use crate::memory::Ram;
+use std::fs::File;
+use std::io::Read;
+use std::io::{Error, Result};
 use std::ops::{Index, IndexMut};
 use std::ops::{Range, RangeTo};
 use std::path::Path;
-use std::io::Read;
-use std::fs::File;
-use std::io::{Result, Error};
 use std::str;
-use crate::memory::Ram;
-use crate::interconnect::MemoryMapper;
 
 /* ******************************************************************************************** */
 // iNES HEADER INFORMATION
@@ -60,12 +60,12 @@ impl Default for RomHeader {
 }
 impl Index<u16> for Cartridge {
     type Output = u8;
-    fn index(&self, index:u16) -> &u8 {
+    fn index(&self, index: u16) -> &u8 {
         &self.prg[index as usize]
     }
 }
 impl IndexMut<u16> for Cartridge {
-    fn index_mut(&mut self, index:u16) -> &mut u8 {
+    fn index_mut(&mut self, index: u16) -> &mut u8 {
         &mut self.prg[index as usize]
     }
 }
@@ -74,11 +74,11 @@ impl MemoryMapper for Cartridge {
     fn read8(&self, addr: u16) -> u8 {
         println!("Cart read: ${:04x}", addr);
         match addr {
-            0 ..= 0x07ff => panic!("Trying to read RAM from Cartridge"),
-            0x0800 ..= 0x1fff => panic!("Trying to read RAM Mirror from Cartridge"),
-            0x2000 ..= 0x3fff => panic!("Trying to read from PPU registers. Not implemented"),
-            0x8000 ..= 0xffff => self.prg[addr as usize & 0x3fff],
-            _ => panic!("Unrecognized read address: {:04x}", addr)
+            0..=0x07ff => panic!("Trying to read RAM from Cartridge"),
+            0x0800..=0x1fff => panic!("Trying to read RAM Mirror from Cartridge"),
+            0x2000..=0x3fff => panic!("Trying to read from PPU registers. Not implemented"),
+            0x8000..=0xffff => self.prg[addr as usize & 0x3fff],
+            _ => panic!("Unrecognized read address: {:04x}", addr),
         }
     }
     fn read16(&self, addr: u16) -> u16 {
@@ -87,10 +87,10 @@ impl MemoryMapper for Cartridge {
     fn write8(&mut self, addr: u16, byte: u8) {
         println!("Cart write: {:04x} to ${:04x}", byte, addr);
         match addr {
-            0 ..= 0x07ff => self.write8(addr, byte),
-            0x0800 ..= 0x1fff => self.write8(addr, byte),
-            0x2000 ..= 0x3fff => self.write8(addr, byte),
-            0x8000 ..= 0xffff => self.write8(addr, byte),
+            0..=0x07ff => self.write8(addr, byte),
+            0x0800..=0x1fff => self.write8(addr, byte),
+            0x2000..=0x3fff => self.write8(addr, byte),
+            0x8000..=0xffff => self.write8(addr, byte),
             _ => eprintln!("Unable to write to memory address"),
         }
     }
@@ -98,12 +98,11 @@ impl MemoryMapper for Cartridge {
 
 #[derive(Debug)]
 pub struct Cartridge {
-    pub header: RomHeader,      // iNES Header
-    pub prg: Vec<u8>,           // A copy of the games program rom? Why? Is this for mirroring?
-    pub chr: Vec<u8>,           // Copy of the games pattern table ROM or RAM for save states.
-    pub rom: Vec<u8>,           // Temporary copy of ROM contents
-    pub mapper_id: u8           // Mapper ID
-
+    pub header: RomHeader, // iNES Header
+    pub prg: Vec<u8>,      // A copy of the games program rom? Why? Is this for mirroring?
+    pub chr: Vec<u8>,      // Copy of the games pattern table ROM or RAM for save states.
+    pub rom: Vec<u8>,      // Temporary copy of ROM contents
+    pub mapper_id: u8,     // Mapper ID
 }
 
 impl Cartridge {
@@ -131,12 +130,15 @@ impl Cartridge {
         let mut f = File::open(&path).expect("Couldn't find ROM");
         let mut buf = Vec::new();
 
-
-        f.read_to_end(&mut buf).expect("i/o error, could not read file to end");
+        f.read_to_end(&mut buf)
+            .expect("i/o error, could not read file to end");
         self.rom[16..buf.len()].clone_from_slice(&buf[16..]);
 
-        println!("\nLoaded: {} Size(KB): {:?}", path.to_str().unwrap(),
-                 (buf.len() as f64 * 0.0009765625) as u32);
+        println!(
+            "\nLoaded: {} Size(KB): {:?}",
+            path.to_str().unwrap(),
+            (buf.len() as f64 * 0.0009765625) as u32
+        );
     }
 
     fn validate_header(&mut self, header: &Vec<u8>) -> Result<RomHeader> {
@@ -145,7 +147,9 @@ impl Cartridge {
         self.header.magic = [header[0], header[1], header[2], header[3]];
 
         if self.header.magic.is_ascii() {
-            let magic = str::from_utf8(&self.header.magic).unwrap().trim_end_matches('');
+            let magic = str::from_utf8(&self.header.magic)
+                .unwrap()
+                .trim_end_matches('');
             println!("ROM header: {}", magic);
 
             // Print bank sizes
@@ -180,7 +184,6 @@ impl Cartridge {
     }
 
     pub fn load_rom(&mut self, mut file: &File) {
-
         // The iNES header is 16 bytes long
         let mut rom = vec![0u8; 3 * PRG_ROM_BANK_SIZE];
         file.read(&mut rom).expect("Could not read rom file");
@@ -197,9 +200,7 @@ impl Cartridge {
             prg_lenght = 0x8000;
         }
         for i in 0..prg_lenght {
-                self.prg[i as usize] = rom[(0x10 + i) as usize];
+            self.prg[i as usize] = rom[(0x10 + i) as usize];
         }
-
     }
 }
-

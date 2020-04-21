@@ -1,22 +1,21 @@
-use std::ops::{Index, IndexMut};
-use std::fmt::{UpperHex, LowerHex};
-use std::fmt::{Debug, Formatter, Result};
 use crate::rom::{Cartridge, RomHeader};
-
+use std::fmt::{Debug, Formatter, Result};
+use std::fmt::{LowerHex, UpperHex};
+use std::ops::{Index, IndexMut};
 
 pub struct Ram {
     pub memory: Box<[u8; 0x800]>,
-    pub sram: Box<[u8; 0x8000]>
+    pub sram: Box<[u8; 0x8000]>,
 }
 
 impl Index<u16> for Ram {
     type Output = u8;
-    fn index(&self, index:u16) -> &u8 {
+    fn index(&self, index: u16) -> &u8 {
         &self.memory[index as usize]
     }
 }
 impl IndexMut<u16> for Ram {
-    fn index_mut(&mut self, index:u16) -> &mut u8 {
+    fn index_mut(&mut self, index: u16) -> &mut u8 {
         &mut self.memory[index as usize]
     }
 }
@@ -28,7 +27,7 @@ impl LowerHex for Ram {
 }
 impl Debug for Ram {
     fn fmt(&self, f: &mut Formatter) -> Result {
-    let value = self;
+        let value = self;
         write!(f, "{:?}", value)
     }
 }
@@ -41,4 +40,3 @@ impl Ram {
         }
     }
 }
-

@@ -2,24 +2,24 @@
 #![allow(clippy::cast_possible_truncation)]
 #![allow(clippy::too_many_lines)]
 
-use minifb;
 use flexi_logger;
+use minifb;
 
-mod rom;
-mod interconnect;
-mod opcode;
-mod memory;
-mod cpu;
-mod ppu;
 mod apu;
+mod cpu;
+mod interconnect;
+mod memory;
+mod opcode;
+mod ppu;
+mod rom;
 
-use std::path::Path;
-use std::io::{self, Read};
-use std::fs::File;
-use interconnect::{Interconnect, MemoryMapper};
 use cpu::ExecutionContext;
-use flexi_logger::{Logger, LogTarget, opt_format, default_format};
-use log::{info, error, warn, debug};
+use flexi_logger::{default_format, opt_format, LogTarget, Logger};
+use interconnect::{Interconnect, MemoryMapper};
+use log::{debug, error, info, warn};
+use std::fs::File;
+use std::io::{self, Read};
+use std::path::Path;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();

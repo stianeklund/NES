@@ -1,11 +1,11 @@
-use crate::interconnect::{MemoryMapper, AddressMatch};
-use crate::opcode::Instruction;
-use crate::memory::Ram;
-use crate::rom::Cartridge;
-use crate::ppu::{Ppu, FrameBuffer};
 use crate::apu::Apu;
-use log::{info, warn, debug, error};
-use std::fmt::{LowerHex, Formatter, Error};
+use crate::interconnect::{AddressMatch, MemoryMapper};
+use crate::memory::Ram;
+use crate::opcode::Instruction;
+use crate::ppu::{FrameBuffer, Ppu};
+use crate::rom::Cartridge;
+use log::{debug, error, info, warn};
+use std::fmt::{Error, Formatter, LowerHex};
 
 impl MemoryMapper for ExecutionContext {
     fn read8(&self, addr: u16) -> u8 {
@@ -13,36 +13,41 @@ impl MemoryMapper for ExecutionContext {
 
         // See https://wiki.nesdev.com/w/index.php/CPU_memory_map
         match addr {
-            0 ..= 0x07ff => self.ram.memory[addr as usize] as u8,
-            0x0800 ..= 0x1fff => self.ram.memory[addr as usize & 0x07ff],
-            0x2000 ..= 0x3fff => self.ppu.read8(addr),
-            0x4000 ..= 0x4017 => self.apu.read8(addr),
-            0x4018 ..= 0x401f => unimplemented!("Read to CPU Test space"),
+            0..=0x07ff => self.ram.memory[addr as usize] as u8,
+            0x0800..=0x1fff => self.ram.memory[addr as usize & 0x07ff],
+            0x2000..=0x3fff => self.ppu.read8(addr),
+            0x4000..=0x4017 => self.apu.read8(addr),
+            0x4018..=0x401f => unimplemented!("Read to CPU Test space"),
             // $6000-$7FFF = Battery Backed Save or Work RAM
-            0x6000 ..= 0x7fff => self.ram.sram[addr as usize] as u8,
-            0x8000 ..= 0xffff => {
-                let mask_amount = if self.cart.header.prg_rom_page_size != 1 { 0x7fff } else { 0x3fff };
+            0x6000..=0x7fff => self.ram.sram[addr as usize] as u8,
+            0x8000..=0xffff => {
+                let mask_amount = if self.cart.header.prg_rom_page_size != 1 {
+                    0x7fff
+                } else {
+                    0x3fff
+                };
                 self.cart.prg[addr as usize & mask_amount]
-            },
+            }
             _ => unimplemented!("Reads to ${:04x} is not implemented", addr),
         }
     }
     fn write8(&mut self, addr: u16, byte: u8) {
         match addr {
-            0 ..= 0x07ff => self.ram.memory[addr as usize] = byte,
-            0x0800 ..= 0x1fff => self.ram.memory[addr as usize & 0x07ff] = byte,
+            0..=0x07ff => self.ram.memory[addr as usize] = byte,
+            0x0800..=0x1fff => self.ram.memory[addr as usize & 0x07ff] = byte,
 
             // $2000-2FFF is normally mapped to the 2kB NES internal VRAM,
             // providing 2 nametables with a mirroring configuration controlled by the cartridge,
             // but it can be partly or fully remapped to RAM on the cartridge,
             // allowing up to 4 simultaneous nametables.
-
-            0x2000 ..= 0x3fff => self.ppu.write8(addr,byte),
-            0x4000 ..= 0x4017 => self.apu.write8(addr, byte),
-            0x6000 ..= 0x7fff => { self.ram.sram[addr as usize] = byte; },
+            0x2000..=0x3fff => self.ppu.write8(addr, byte),
+            0x4000..=0x4017 => self.apu.write8(addr, byte),
+            0x6000..=0x7fff => {
+                self.ram.sram[addr as usize] = byte;
+            }
             // Some tests store ASCII characters in SRAM. Output as characters when writing to SRAM
             // println!("Status: {:04x}", self.ram.sram[0x6000]);
-            0x8000 ..= 0xffff => self.cart.prg[addr as usize & 0x3fff] = byte,
+            0x8000..=0xffff => self.cart.prg[addr as usize & 0x3fff] = byte,
             _ => eprintln!("Trying to write to memory address {:04x}", addr),
         };
         if self.debug {
@@ -61,13 +66,15 @@ pub struct AddressMode<T> {
 }
 
 // Implement lowerhex for addresses
-impl<T> LowerHex for AddressMode<T> where T: std::fmt::LowerHex {
+impl<T> LowerHex for AddressMode<T>
+where
+    T: std::fmt::LowerHex,
+{
     fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
-        write!(f, "Address:${:04x} Data:{:02x} Byte Length:{} Cycle Length:{}",
-               self.address,
-               self.data,
-               self.byte_length,
-               self.cycle_length
+        write!(
+            f,
+            "Address:${:04x} Data:{:02x} Byte Length:{} Cycle Length:{}",
+            self.address, self.data, self.byte_length, self.cycle_length
         )
     }
 }
@@ -77,20 +84,20 @@ impl From<AddressMode<u8>> for AddressMode<u16> {
             address: item.address,
             data: u16::from(item.data),
             byte_length: item.byte_length,
-            cycle_length: item.cycle_length
+            cycle_length: item.cycle_length,
         }
     }
 }
-impl<T>AddressMode<T> {
-    fn new(address: u16, data:T, byte_length: u8, cycle_length: u8) -> Self {
+impl<T> AddressMode<T> {
+    fn new(address: u16, data: T, byte_length: u8, cycle_length: u8) -> Self {
         Self {
             address,
             data,
             byte_length,
-            cycle_length
+            cycle_length,
         }
     }
-    fn with_byte_length(address: u16, data: T, byte_length: u8, cycle_length:u8) -> Self {
+    fn with_byte_length(address: u16, data: T, byte_length: u8, cycle_length: u8) -> Self {
         Self::new(address, data, byte_length, cycle_length)
     }
 }
@@ -105,7 +112,6 @@ pub struct StatusRegister {
     interrupt: bool,
     zero: bool,
     carry: bool,
-
 }
 
 #[derive(Debug, Default)]
@@ -138,15 +144,14 @@ impl Cpu {
                 decimal: false,
                 interrupt: false,
                 zero: false,
-                carry: false
+                carry: false,
             },
             cycles: 0,
             opcode: 0,
-            p: 0
+            p: 0,
         }
     }
 }
-
 
 pub struct ExecutionContext {
     pub cpu: Cpu,
@@ -173,29 +178,29 @@ impl ExecutionContext {
         self.cpu.reg.pc = self.cpu.reg.pc.wrapping_add(offset);
     }
     fn adv_cycles(&mut self, amount: u16) {
-       self.cpu.cycles = self.cpu.cycles.wrapping_add(amount);
+        self.cpu.cycles = self.cpu.cycles.wrapping_add(amount);
     }
     fn adv(&mut self, mode: AddressMode<u16>) {
         match self.cpu.opcode {
             // Don't increment the PC for JMP & JSR instructions
-            0x4c | 0x6c | 0x20 => { self.adv_cycles(mode.cycle_length.into()) },
+            0x4c | 0x6c | 0x20 => self.adv_cycles(mode.cycle_length.into()),
             // RTS / RTI
             0x40 | 0x60 => {
                 self.adv_cycles(mode.cycle_length.into());
-            },
+            }
             _ => {
                 self.adv_pc((mode.byte_length).into());
                 self.adv_cycles(mode.cycle_length.into());
             }
         }
     }
-    fn implied(&self, cycles:u8) -> AddressMode<u16> {
+    fn implied(&self, cycles: u8) -> AddressMode<u16> {
         let address = self.cpu.reg.pc;
         AddressMode {
             address,
             data: u16::from(self.read8(address)),
             byte_length: 1,
-            cycle_length: cycles
+            cycle_length: cycles,
         }
     }
     // Immediate
@@ -205,27 +210,27 @@ impl ExecutionContext {
             address,
             data: self.read8(address),
             byte_length: 2,
-            cycle_length: 2
+            cycle_length: 2,
         }
     }
     // TODO Remove? This isn't a real mode
     fn imm16(&self) -> AddressMode<u16> {
         let address = self.cpu.reg.pc + 1;
-        AddressMode{
+        AddressMode {
             address,
             data: self.read16(address),
             byte_length: 2,
-            cycle_length: 2
+            cycle_length: 2,
         }
     }
     fn abs(&self) -> AddressMode<u16> {
         let pc = self.cpu.reg.pc + 1;
         let address = self.read16(pc);
-        AddressMode{
+        AddressMode {
             address,
             data: u16::from(self.read16(address) as u8),
             byte_length: 3,
-            cycle_length: 4
+            cycle_length: 4,
         }
     }
     fn abs_x(&self) -> AddressMode<u16> {
@@ -235,28 +240,28 @@ impl ExecutionContext {
             address,
             data: u16::from(self.read16(address) as u8),
             byte_length: 3,
-            cycle_length: 4
+            cycle_length: 4,
         }
     }
-    fn abs_y(&self) -> AddressMode <u16> {
+    fn abs_y(&self) -> AddressMode<u16> {
         let address: u16 = self.read16(self.cpu.reg.pc + 1) + u16::from(self.cpu.reg.y);
         AddressMode {
             address,
             data: u16::from(self.read16(address) as u8),
             byte_length: 3,
-            cycle_length: 4
+            cycle_length: 4,
         }
     }
-    fn relative(&self) -> AddressMode <u8> {
+    fn relative(&self) -> AddressMode<u8> {
         let address = self.cpu.reg.pc + 1;
         AddressMode {
             address,
             data: self.read8(address),
             byte_length: 2,
-            cycle_length: 2
+            cycle_length: 2,
         }
     }
-    fn zp(&self) -> AddressMode <u8> {
+    fn zp(&self) -> AddressMode<u8> {
         let address = u16::from(self.read8(self.cpu.reg.pc + 1));
         AddressMode {
             address,
@@ -265,26 +270,26 @@ impl ExecutionContext {
             cycle_length: 3,
         }
     }
-    fn zp_x (&self) -> AddressMode <u16> {
+    fn zp_x(&self) -> AddressMode<u16> {
         let address = u16::from(self.read8(self.cpu.reg.pc + 1) + self.cpu.reg.x);
         AddressMode {
             address,
             data: u16::from(self.read8(address)),
             byte_length: 2,
-            cycle_length: 4
+            cycle_length: 4,
         }
     }
-    fn zp_y (&self) -> AddressMode <u16> {
+    fn zp_y(&self) -> AddressMode<u16> {
         let address = u16::from(self.read8(self.cpu.reg.pc + 1) + self.cpu.reg.y);
         // let address = self.read16(self.cpu.reg.pc + 1) + u16::from(self.cpu.reg.y);
         AddressMode {
             address,
             data: u16::from(self.read8(address)),
             byte_length: 2,
-            cycle_length: 4
+            cycle_length: 4,
         }
     }
-    fn indirect(&self) -> AddressMode <u16> {
+    fn indirect(&self) -> AddressMode<u16> {
         let addr = self.read16(self.cpu.reg.pc + 1);
         let lo = self.read8(addr);
         // CPU Bug?
@@ -295,30 +300,31 @@ impl ExecutionContext {
             address,
             data: self.read8(address) as u16,
             byte_length: 3,
-            cycle_length: 5
+            cycle_length: 5,
         }
     }
-    fn indirect_x(&self) -> AddressMode <u8> {
+    fn indirect_x(&self) -> AddressMode<u8> {
         let pointer = self.read8(self.cpu.reg.pc + 1).wrapping_add(self.cpu.reg.x);
-        let indirect =  u16::from_le_bytes([self.read8(pointer.into()), self.read8((pointer + 1).into())]);
+        let indirect =
+            u16::from_le_bytes([self.read8(pointer.into()), self.read8((pointer + 1).into())]);
         AddressMode {
             address: indirect,
             data: self.read8(indirect),
             byte_length: 2,
-            cycle_length: 6
+            cycle_length: 6,
         }
     }
-    fn indirect_y(&self) -> AddressMode <u8> {
+    fn indirect_y(&self) -> AddressMode<u8> {
         let pointer = self.read8(self.cpu.reg.pc + 1);
-        let indirect =  u16::from_le_bytes([self.read8(pointer.into()), self.read8((pointer + 1).into())]);
+        let indirect =
+            u16::from_le_bytes([self.read8(pointer.into()), self.read8((pointer + 1).into())]);
         let address = indirect.wrapping_add(self.cpu.reg.y.into());
         AddressMode {
             address,
             data: self.read8(address),
             byte_length: 2,
-            cycle_length: 6
-            // 5 or 6 cycles depending on low address byte + Y overflow
-            // Stores and RMW instructions always take 6 and 8 cycles.
+            cycle_length: 6, // 5 or 6 cycles depending on low address byte + Y overflow
+                             // Stores and RMW instructions always take 6 and 8 cycles.
         }
     }
     pub fn decode(&mut self) {
@@ -327,12 +333,18 @@ impl ExecutionContext {
         self.cpu.p = self.get_status_flags();
         // Make debug printing look like Nintendulator
         if !self.debug {
-            info!("{:04X}  {:02X} {:02X}     {} A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X}",
-                  self.cpu.reg.pc, opcode, // Addr
-                  self.read8(self.cpu.reg.pc + 1),  // Operand
-                  Instruction::short_mnemonic(opcode),
-                  self.cpu.reg.a, self.cpu.reg.x, self.cpu.reg.y,
-                  self.cpu.p, self.cpu.reg.sp);
+            info!(
+                "{:04X}  {:02X} {:02X}     {} A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X}",
+                self.cpu.reg.pc,
+                opcode,                          // Addr
+                self.read8(self.cpu.reg.pc + 1), // Operand
+                Instruction::short_mnemonic(opcode),
+                self.cpu.reg.a,
+                self.cpu.reg.x,
+                self.cpu.reg.y,
+                self.cpu.p,
+                self.cpu.reg.sp
+            );
         }
         let mode: AddressMode<u16> = match opcode {
             0x00 | 0x02 => ::std::process::exit(0x100), // self.brk(),
@@ -519,10 +531,15 @@ impl ExecutionContext {
         self.adv(mode);
     }
 
-    fn adc(&mut self, value: AddressMode <u16>) -> AddressMode<u16> {
+    fn adc(&mut self, value: AddressMode<u16>) -> AddressMode<u16> {
         let a = u16::from(self.cpu.reg.a);
         // let operand = self.read(value);
-        let result = self.cpu.reg.a.wrapping_add(value.data as u8).wrapping_add(self.cpu.flags.carry as u8);
+        let result = self
+            .cpu
+            .reg
+            .a
+            .wrapping_add(value.data as u8)
+            .wrapping_add(self.cpu.flags.carry as u8);
         self.cpu.reg.a = result as u8;
         // Set overflow flag when A and the operand have the same sign
         // and A and the result have different sign
@@ -534,7 +551,7 @@ impl ExecutionContext {
     }
     // ASL (Accumulator) helper function for ASL Accumulator
     fn asla(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> {
-        let a: u8 =  self.cpu.reg.a;
+        let a: u8 = self.cpu.reg.a;
         // let result = a.wrapping_shl(1);
         let result = a << 1;
         self.cpu.reg.a = result;
@@ -546,7 +563,7 @@ impl ExecutionContext {
     }
 
     // Arithmetic shift left
-    fn asl(&mut self, value: AddressMode <u16>) -> AddressMode<u16> {
+    fn asl(&mut self, value: AddressMode<u16>) -> AddressMode<u16> {
         // ASL shifts all bits left one position. 0 is shifted into bit 0
         // and the original bit 7 is shifted into the carry slot
         // Affected flags: S Z C
@@ -559,21 +576,21 @@ impl ExecutionContext {
         value
     }
 
-    fn and(&mut self, value: AddressMode <u16>) -> AddressMode<u16> {
+    fn and(&mut self, value: AddressMode<u16>) -> AddressMode<u16> {
         self.cpu.reg.a &= value.data as u8;
         self.cpu.flags.negative = (self.cpu.reg.a & 0x80) != 0;
         self.cpu.flags.zero = self.cpu.reg.a == 0;
         value
     }
     // Branch if Carry Set
-    fn bcs(&mut self, offset: AddressMode <u8>) -> AddressMode<u16> {
+    fn bcs(&mut self, offset: AddressMode<u8>) -> AddressMode<u16> {
         if self.cpu.flags.carry {
             self.adv_pc(u16::from(offset.data)); // add offset to pc
         }
         self.check_branch(AddressMode::from(offset));
         AddressMode::from(offset)
     }
-    fn bcc(&mut self, offset: AddressMode <u16>) -> AddressMode<u16> {
+    fn bcc(&mut self, offset: AddressMode<u16>) -> AddressMode<u16> {
         if !(self.cpu.flags.carry) {
             self.adv_pc(offset.data);
         }
@@ -581,14 +598,14 @@ impl ExecutionContext {
         offset
     }
     // Branch on Equal
-    fn beq(&mut self, offset: AddressMode <u16>) -> AddressMode<u16> {
+    fn beq(&mut self, offset: AddressMode<u16>) -> AddressMode<u16> {
         if self.cpu.flags.zero {
             self.adv_pc(offset.data);
         }
         self.check_branch(offset);
         offset
     }
-    fn check_branch(&mut self, v: AddressMode <u16>) -> AddressMode<u16> {
+    fn check_branch(&mut self, v: AddressMode<u16>) -> AddressMode<u16> {
         if self.cpu.reg.prev_pc & 0xFF00 != self.cpu.reg.pc & 0xFF00 {
             self.adv_cycles(2);
         } else {
@@ -597,7 +614,7 @@ impl ExecutionContext {
         v
     }
     // Branch if Minus
-    fn bmi(&mut self, offset: AddressMode <u16>) -> AddressMode<u16> {
+    fn bmi(&mut self, offset: AddressMode<u16>) -> AddressMode<u16> {
         if self.cpu.flags.negative {
             self.adv_pc(offset.data);
         }
@@ -605,14 +622,14 @@ impl ExecutionContext {
         offset
     }
     // Branch on Plus (if positive)
-    fn bpl(&mut self, offset: AddressMode <u16>) -> AddressMode<u16> {
+    fn bpl(&mut self, offset: AddressMode<u16>) -> AddressMode<u16> {
         if !self.cpu.flags.negative {
             self.adv_pc(offset.data);
         }
         self.check_branch(offset);
         offset
     }
-    fn bne(&mut self, offset: AddressMode <u16>) -> AddressMode<u16> {
+    fn bne(&mut self, offset: AddressMode<u16>) -> AddressMode<u16> {
         if !self.cpu.flags.zero {
             self.adv_pc(offset.data);
         }
@@ -622,7 +639,7 @@ impl ExecutionContext {
         offset
     }
     // Branch on overflow clear
-    fn bvc(&mut self, offset: AddressMode <u16>) -> AddressMode<u16> {
+    fn bvc(&mut self, offset: AddressMode<u16>) -> AddressMode<u16> {
         if !self.cpu.flags.overflow {
             self.adv_pc(offset.data);
         }
@@ -630,7 +647,7 @@ impl ExecutionContext {
         offset
     }
     // Branch on overflow set
-    fn bvs(&mut self, value: AddressMode <u8>) -> AddressMode<u16> {
+    fn bvs(&mut self, value: AddressMode<u8>) -> AddressMode<u16> {
         if self.cpu.flags.overflow {
             // let offset = self.read8(value.address) as i8 as u16;
             let offset = (value.data as i8) as u16;
@@ -646,43 +663,60 @@ impl ExecutionContext {
         self.cpu.reg.pc = self.read16(0xfffe);
         // For now Panic here
         // panic!("BRK PC:{:04x}", self.cpu.reg.pc);
-        AddressMode::with_byte_length(self.cpu.reg.pc, u16::from(self.read8(self.cpu.reg.pc)), 1, 7)
+        AddressMode::with_byte_length(
+            self.cpu.reg.pc,
+            u16::from(self.read8(self.cpu.reg.pc)),
+            1,
+            7,
+        )
     }
     // Test Bits N Z V
-    fn bit(&mut self, value: AddressMode <u16>) -> AddressMode<u16> {
+    fn bit(&mut self, value: AddressMode<u16>) -> AddressMode<u16> {
         let v = value.data;
         let a = self.cpu.reg.a as u8;
-        self.cpu.flags.zero = (v as u8 & a )== 0;
+        self.cpu.flags.zero = (v as u8 & a) == 0;
         self.cpu.flags.negative = (v & 0x80) != 0;
         self.cpu.flags.overflow = (v & 0x40) != 0;
         value
     }
 
     // Flag clear instructions
-    fn clc(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> { self.cpu.flags.carry = false; mode }
-    fn cld(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> { self.cpu.flags.decimal = false; mode }
-    fn cli(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> { self.cpu.flags.interrupt = false; mode }
-    fn clv(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> { self.cpu.flags.overflow = false; mode }
+    fn clc(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> {
+        self.cpu.flags.carry = false;
+        mode
+    }
+    fn cld(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> {
+        self.cpu.flags.decimal = false;
+        mode
+    }
+    fn cli(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> {
+        self.cpu.flags.interrupt = false;
+        mode
+    }
+    fn clv(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> {
+        self.cpu.flags.overflow = false;
+        mode
+    }
 
     // Compare with accumulator
-    fn cmp(&mut self, mode: AddressMode <u16>) -> AddressMode<u16> {
+    fn cmp(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> {
         let result = self.cpu.reg.a.wrapping_sub(mode.data as u8);
         self.cpu.flags.zero = result as u8 == 0;
         self.cpu.flags.carry = self.cpu.reg.a >= mode.data as u8;
         self.cpu.flags.negative = result as u8 & 0x80 != 0;
         mode
     }
-    fn cpx(&mut self, value: AddressMode <u16>) -> AddressMode<u16> {
+    fn cpx(&mut self, value: AddressMode<u16>) -> AddressMode<u16> {
         // let value = self.read8(value);
         let result = self.cpu.reg.x.wrapping_sub(value.data as u8);
         self.cpu.flags.zero = result == 0;
-        self.cpu.flags.carry = self.cpu.reg.x>= value.data as u8;
+        self.cpu.flags.carry = self.cpu.reg.x >= value.data as u8;
         self.cpu.flags.negative = result & 0x80 != 0;
         value
     }
-    fn cpy(&mut self, value: AddressMode <u16>) -> AddressMode<u16> {
+    fn cpy(&mut self, value: AddressMode<u16>) -> AddressMode<u16> {
         // let value = self.read8(value);
-        let result = self.cpu.reg.y.wrapping_sub(value.data  as u8);
+        let result = self.cpu.reg.y.wrapping_sub(value.data as u8);
         self.cpu.flags.zero = result == 0;
         // self.cpu.flags.zero = y == value;
         self.cpu.flags.carry = self.cpu.reg.y >= value.data as u8;
@@ -690,7 +724,7 @@ impl ExecutionContext {
         value
     }
 
-    fn dec(&mut self, value: AddressMode <u16>) -> AddressMode<u16> {
+    fn dec(&mut self, value: AddressMode<u16>) -> AddressMode<u16> {
         let result = value.data.wrapping_sub(1) as u8;
         self.write8(value.address, result);
         self.cpu.flags.negative = (result & 0x80) != 0;
@@ -727,7 +761,7 @@ impl ExecutionContext {
         mode
     }
     // Exclusive OR (XOR)
-    fn eor(&mut self, value: AddressMode <u16>) -> AddressMode<u16> {
+    fn eor(&mut self, value: AddressMode<u16>) -> AddressMode<u16> {
         // Exclusive OR is performed on the accumulator's contents with the contents of a byte
         // of memory
         let a = self.cpu.reg.a;
@@ -736,8 +770,10 @@ impl ExecutionContext {
         self.cpu.flags.zero = self.cpu.reg.a == 0;
         value
     }
-    fn hlt(&self) { panic!("HLT! Opcode:{:04x}", self.cpu.opcode); }
-    fn lax(&mut self, value: AddressMode <u16>) -> AddressMode<u16> {
+    fn hlt(&self) {
+        panic!("HLT! Opcode:{:04x}", self.cpu.opcode);
+    }
+    fn lax(&mut self, value: AddressMode<u16>) -> AddressMode<u16> {
         // Load both the accumulator and the X register with contents of a memory location
         // Part of the undocumented 6502 opcodes
         // (Sub-instructions: LDA, LDX)
@@ -749,19 +785,19 @@ impl ExecutionContext {
         self.cpu.flags.negative = (result & 0x80) != 0;
         value
     }
-    fn ldy(&mut self, value: AddressMode <u16>) -> AddressMode<u16> {
+    fn ldy(&mut self, value: AddressMode<u16>) -> AddressMode<u16> {
         self.cpu.reg.y = value.data as u8;
         self.cpu.flags.zero = self.cpu.reg.y as u8 == 0;
         self.cpu.flags.negative = self.cpu.reg.y as u8 & 0x80 != 0;
         value
     }
-    fn ldx(&mut self, value: AddressMode <u16>) -> AddressMode<u16> {
+    fn ldx(&mut self, value: AddressMode<u16>) -> AddressMode<u16> {
         self.cpu.reg.x = value.data as u8;
         self.cpu.flags.zero = self.cpu.reg.x == 0;
         self.cpu.flags.negative = (self.cpu.reg.x & 0x80) != 0;
         value
     }
-    fn lda(&mut self, value: AddressMode <u16>) -> AddressMode<u16> {
+    fn lda(&mut self, value: AddressMode<u16>) -> AddressMode<u16> {
         self.cpu.reg.a = value.data as u8;
         self.cpu.flags.zero = value.data as u8 == 0;
         self.cpu.flags.negative = (value.data as u8 & 0x80) != 0;
@@ -769,7 +805,7 @@ impl ExecutionContext {
     }
 
     // LSR (only memory operations, see lsra for Accumulator)
-    fn lsr(&mut self, value: AddressMode <u16>) -> AddressMode<u16> {
+    fn lsr(&mut self, value: AddressMode<u16>) -> AddressMode<u16> {
         let data = value.data as u8;
         let result = data >> 1;
         self.cpu.flags.negative = result & 0x80 != 0;
@@ -784,14 +820,19 @@ impl ExecutionContext {
         // Flags affected
         let value = self.cpu.reg.a;
         let result = value >> 1;
-        self.cpu.reg.a  = result;
+        self.cpu.reg.a = result;
         self.cpu.flags.negative = result & 0x80 != 0;
         self.cpu.flags.zero = result == 0;
         self.cpu.flags.carry = (value & 0x1) != 0;
         mode
     }
     fn nop(&self) -> AddressMode<u16> {
-        AddressMode::with_byte_length(self.cpu.reg.pc, u16::from(self.read8(self.cpu.reg.pc + 1)), 1, 2)
+        AddressMode::with_byte_length(
+            self.cpu.reg.pc,
+            u16::from(self.read8(self.cpu.reg.pc + 1)),
+            1,
+            2,
+        )
     }
     fn ora(&mut self, value: AddressMode<u16>) -> AddressMode<u16> {
         self.cpu.reg.a = (value.data as u8) | (self.cpu.reg.a) as u8;
@@ -804,14 +845,16 @@ impl ExecutionContext {
         let old_carry = self.cpu.flags.carry;
         self.cpu.flags.carry = (self.cpu.reg.a & 0x80) != 0;
         let mut result = self.cpu.reg.a << 1;
-        if old_carry { result |= 1; }
+        if old_carry {
+            result |= 1;
+        }
         self.cpu.reg.a = result;
         self.cpu.flags.negative = (result & 0x80) != 0;
         self.cpu.flags.zero = result == 0;
         mode
     }
     // Rotate one bit right memory
-    fn rol(&mut self, value: AddressMode <u16>) -> AddressMode<u16> {
+    fn rol(&mut self, value: AddressMode<u16>) -> AddressMode<u16> {
         // Move each of the bits in either A or M one place to the left.
         // Bit 0 is filled with the current value of the carry flag
         // the old bit 7 becomes the new carry flag value.
@@ -819,7 +862,9 @@ impl ExecutionContext {
         let old_carry = self.cpu.flags.carry;
         self.cpu.flags.carry = (operand & 0x80) != 0;
         let mut result = operand << 1;
-        if old_carry { result |= 1; }
+        if old_carry {
+            result |= 1;
+        }
         self.write8(value.address, result);
         // Set remaining flags
         self.cpu.flags.negative = (result & 0x80) != 0;
@@ -831,22 +876,26 @@ impl ExecutionContext {
         // Old bit 7 become new carry flag value
         let operand = self.cpu.reg.a;
         let old_carry = self.cpu.flags.carry;
-        self.cpu.flags.carry = (operand  & 0x01) != 0;
+        self.cpu.flags.carry = (operand & 0x01) != 0;
         let mut result = operand >> 1;
-        if old_carry { result |= 0x80; }
+        if old_carry {
+            result |= 0x80;
+        }
         self.cpu.reg.a = result;
         // Set remaining flags
         self.cpu.flags.negative = (result & 0x80) != 0;
         self.cpu.flags.zero = result == 0;
         mode
     }
-    fn ror(&mut self, value: AddressMode <u16>) -> AddressMode<u16> {
+    fn ror(&mut self, value: AddressMode<u16>) -> AddressMode<u16> {
         let operand = value.data;
         let old_carry = self.cpu.flags.carry;
         // Set carry flag with bit 0 of operand
-        self.cpu.flags.carry = (operand  & 0x01) != 0;
+        self.cpu.flags.carry = (operand & 0x01) != 0;
         let mut result = operand >> 1;
-        if old_carry { result |= 0x80; }
+        if old_carry {
+            result |= 0x80;
+        }
         self.write8(value.address, result as u8);
         // Set remaining flags
         self.cpu.flags.negative = (result & 0x80) != 0;
@@ -867,15 +916,23 @@ impl ExecutionContext {
         self.cpu.reg.pc = pc;
         mode
     }
-    fn sed(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> { self.cpu.flags.decimal = true; mode }
+    fn sed(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> {
+        self.cpu.flags.decimal = true;
+        mode
+    }
 
-    fn sbc(&mut self, value: AddressMode <u16>) -> AddressMode<u16> {
+    fn sbc(&mut self, value: AddressMode<u16>) -> AddressMode<u16> {
         let a = u16::from(self.cpu.reg.a);
         let operand = !value.data as u8;
-        let result: u8 = self.cpu.reg.a.wrapping_add(operand).wrapping_add(self.cpu.flags.carry as u8);
+        let result: u8 = self
+            .cpu
+            .reg
+            .a
+            .wrapping_add(operand)
+            .wrapping_add(self.cpu.flags.carry as u8);
         self.cpu.reg.a = result as u8;
         self.cpu.flags.overflow = !(a ^ operand as u16) & (a ^ result as u16) & 0x80 != 0;
-       //  self.cpu.flags.overflow = (a ^ operand) & (a ^ result) & 0x80 != 0;
+        //  self.cpu.flags.overflow = (a ^ operand) & (a ^ result) & 0x80 != 0;
         // Check if there's a carry between bit 6 & 7 and the operand is not 0 set carry
         self.cpu.flags.carry = (result as u16) <= (a as u16) && operand != 0;
         self.cpu.flags.negative = result & 0x80 != 0;
@@ -883,7 +940,7 @@ impl ExecutionContext {
         value
     }
     // SLO Accumulator: UNOFFICIAL OPCODE
-    fn sloa(&mut self, value: AddressMode <u16>) -> AddressMode<u16>  {
+    fn sloa(&mut self, value: AddressMode<u16>) -> AddressMode<u16> {
         let result = (value.data << 1) as u8;
         self.cpu.reg.a |= result;
         self.cpu.flags.carry = result & 0x80 != 0;
@@ -892,7 +949,7 @@ impl ExecutionContext {
     }
     // Shift left one bit in memory, then OR the result with the accumulator
     // Part of undocumented opcodes
-    fn slo(&mut self, value: AddressMode <u16>) -> AddressMode<u16> {
+    fn slo(&mut self, value: AddressMode<u16>) -> AddressMode<u16> {
         let result = value.data << 1;
         self.cpu.reg.a |= result as u8;
         self.cpu.flags.carry = result & 0x80 != 0;
@@ -903,8 +960,14 @@ impl ExecutionContext {
         self.write8(mode.address, self.cpu.reg.a);
         mode
     }
-    fn sty(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> { self.write8(mode.address, self.cpu.reg.y); mode }
-    fn stx(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> { self.write8(mode.address, self.cpu.reg.x); mode }
+    fn sty(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> {
+        self.write8(mode.address, self.cpu.reg.y);
+        mode
+    }
+    fn stx(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> {
+        self.write8(mode.address, self.cpu.reg.x);
+        mode
+    }
     // Transfer Accumulator to X
     fn tax(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> {
         self.cpu.reg.x = self.cpu.reg.a;
@@ -934,7 +997,7 @@ impl ExecutionContext {
         mode
     }
     // Transfer X to Stack Pointer
-    fn txs(&mut self, mode: AddressMode<u16>) -> AddressMode<u16>  {
+    fn txs(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> {
         self.cpu.reg.sp = self.cpu.reg.x;
         mode
     }
@@ -966,16 +1029,19 @@ impl ExecutionContext {
         u16::from(self.pop_byte()) | u16::from(self.pop_byte()).wrapping_shl(8)
     }
     // Push accumulator
-    fn pha(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> { self.push_byte(self.cpu.reg.a); mode }
+    fn pha(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> {
+        self.push_byte(self.cpu.reg.a);
+        mode
+    }
     pub fn get_status_flags(&self) -> u8 {
-        let ps = if self.cpu.flags.negative { 0x80 } else { 0x0 } |
-            if self.cpu.flags.overflow { 0x40 } else { 0x0 } |
-            if self.cpu.flags.reserved { 0x20 } else { 0x0 } |
-            if self.cpu.flags.brk { 0x10 } else { 0x0 } |
-            if self.cpu.flags.decimal { 0x08 } else { 0x0 } |
-            if self.cpu.flags.interrupt { 0x04 } else { 0x0 } |
-            if self.cpu.flags.zero { 0x02 } else { 0x0 } |
-            if self.cpu.flags.carry { 0x01 } else { 0x0 };
+        let ps = if self.cpu.flags.negative { 0x80 } else { 0x0 }
+            | if self.cpu.flags.overflow { 0x40 } else { 0x0 }
+            | if self.cpu.flags.reserved { 0x20 } else { 0x0 }
+            | if self.cpu.flags.brk { 0x10 } else { 0x0 }
+            | if self.cpu.flags.decimal { 0x08 } else { 0x0 }
+            | if self.cpu.flags.interrupt { 0x04 } else { 0x0 }
+            | if self.cpu.flags.zero { 0x02 } else { 0x0 }
+            | if self.cpu.flags.carry { 0x01 } else { 0x0 };
         ps
     }
     fn set_status_flags(&mut self, value: u8) {
@@ -1016,10 +1082,10 @@ impl ExecutionContext {
         mode
     }
     // Increment Memory
-    fn inc(&mut self, value: AddressMode <u16>) -> AddressMode<u16> {
+    fn inc(&mut self, value: AddressMode<u16>) -> AddressMode<u16> {
         let v = value.data.wrapping_add(1) as u8;
         self.write8(value.address, v);
-        self.cpu.flags.negative= v & 0x80 != 0;
+        self.cpu.flags.negative = v & 0x80 != 0;
         self.cpu.flags.zero = v == 0;
         value
     }
@@ -1037,25 +1103,37 @@ impl ExecutionContext {
         mode
     }
     // Jump to Subroutine
-    fn jsr(&mut self, mode: AddressMode<u16>) -> AddressMode<u16>  {
+    fn jsr(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> {
         // Push to stack
         let pc = self.cpu.reg.pc;
         self.push_word(pc + 2); // Because we need to increment PC by one to fetch
         self.cpu.reg.pc = mode.address as u16;
         mode
     }
-    fn jmp(&mut self, mode: AddressMode <u16>) -> AddressMode<u16> {
+    fn jmp(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> {
         self.cpu.reg.pc = mode.address;
         mode
     }
-    fn sec(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> { self.cpu.flags.carry = true; mode }
-    fn sei(&mut self, mode:AddressMode<u16>) -> AddressMode<u16> { self.cpu.flags.interrupt = true; mode }
+    fn sec(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> {
+        self.cpu.flags.carry = true;
+        mode
+    }
+    fn sei(&mut self, mode: AddressMode<u16>) -> AddressMode<u16> {
+        self.cpu.flags.interrupt = true;
+        mode
+    }
 
     // ISC (Increase memory by one) UNOFFICIAL OPCODE
-    fn isc(&mut self, value: AddressMode <u16>) -> AddressMode<u16> {
-        let addr = self.read16(value.data).wrapping_add(u16::from(self.cpu.reg.x));
-        if (value.data - u16::from(self.cpu.reg.x)) & 0xff00 != value.data & 0xff00 { self.adv_cycles(1); }
-        let result = u16::from(self.cpu.reg.a).wrapping_sub(addr as u16).wrapping_sub(self.cpu.flags.carry as u16);
+    fn isc(&mut self, value: AddressMode<u16>) -> AddressMode<u16> {
+        let addr = self
+            .read16(value.data)
+            .wrapping_add(u16::from(self.cpu.reg.x));
+        if (value.data - u16::from(self.cpu.reg.x)) & 0xff00 != value.data & 0xff00 {
+            self.adv_cycles(1);
+        }
+        let result = u16::from(self.cpu.reg.a)
+            .wrapping_sub(addr as u16)
+            .wrapping_sub(self.cpu.flags.carry as u16);
         self.cpu.flags.zero = result.trailing_zeros() >= 8;
         self.cpu.flags.negative = (result & 0x80) != 0;
         self.cpu.reg.a = result as u8;
